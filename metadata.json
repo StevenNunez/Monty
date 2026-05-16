@@ -1,0 +1,6 @@
+{
+  "name": "Monty",
+  "description": "Monty — App de seguimiento de ingresos diarios para conductores de app. Registra ingresos, gestiona gastos y alcanza tus metas financieras mensuales.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
