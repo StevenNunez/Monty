@@ -9,6 +9,7 @@ import { Session } from '@supabase/supabase-js';
 import Dashboard from './components/Dashboard';
 import Auth from './components/Auth';
 import Navigation from './components/Navigation';
+import InteractiveLogo from './components/InteractiveLogo';
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -77,11 +78,23 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20 font-sans text-gray-900">
-      <Dashboard 
-        user={session.user} 
-        activeTab={currentTab} 
-        onCloseTab={() => setCurrentTab('home')} 
+      <Dashboard
+        user={session.user}
+        activeTab={currentTab}
+        onCloseTab={() => setCurrentTab('home')}
       />
+      <footer className="flex items-center justify-center gap-1.5 py-3 pb-24 text-xs text-gray-400">
+        <span>Desarrollado por</span>
+        <a
+          href="https://www.teolabs.app"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:opacity-80 transition-opacity"
+        >
+          <InteractiveLogo variant="footer-small" className="text-[13px]" />
+        </a>
+        <span>®</span>
+      </footer>
       <Navigation currentTab={currentTab} onTabChange={setCurrentTab} />
     </div>
   );

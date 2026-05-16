@@ -213,22 +213,216 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
 
   const maxExpenseCategory = useMemo(() => Math.max(...expenseCategoryData.map(e => e.total), 1), [expenseCategoryData]);
 
-  // ─── Export CSV ───────────────────────────────────────────────
-  const exportCSV = () => {
-    const header = 'Fecha,Tipo,Descripción,Monto';
-    const rows = [...items]
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map(item =>
-        `${item.date},${item.type === 'income' ? 'Ingreso' : item.type === 'expense' ? 'Gasto' : 'Extra'},${item.description},${item.type === 'expense' ? -item.amount : item.amount}`
-      );
-    const csv = [header, ...rows].join('\n');
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `monty_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  // ─── Export PDF ───────────────────────────────────────────────
+  const exportPDF = () => {
+    const fmt = (n: number) =>
+      new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(n);
+
+    const totalIncome  = items.filter(i => i.type === 'income').reduce((s, i) => s + i.amount, 0);
+    const totalExtra   = items.filter(i => i.type === 'extra').reduce((s, i) => s + i.amount, 0);
+    const totalExpense = items.filter(i => i.type === 'expense').reduce((s, i) => s + i.amount, 0);
+    const totalNet     = totalIncome + totalExtra - totalExpense;
+
+    const sortedItems = [...items].sort((a, b) => b.date.localeCompare(a.date));
+
+    const firstDate = sortedItems.length
+      ? new Date(sortedItems[sortedItems.length - 1].date + 'T00:00:00')
+          .toLocaleDateString('es-CL', { day: 'numeric', month: 'long', year: 'numeric' })
+      : '—';
+    const lastDate = sortedItems.length
+      ? new Date(sortedItems[0].date + 'T00:00:00')
+          .toLocaleDateString('es-CL', { day: 'numeric', month: 'long', year: 'numeric' })
+      : '—';
+    const generatedAt = new Date().toLocaleDateString('es-CL', {
+      day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+
+    const weeklySectionRows = weeklyData.map(d => `
+      <tr>
+        <td>${new Date(d.date + 'T00:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'short' })}</td>
+        <td style="text-align:right; font-weight:700; color:${d.net >= 0 ? '#4f46e5' : '#ef4444'}">
+          ${d.net === 0 ? '—' : (d.net > 0 ? '+' : '') + fmt(d.net)}
+        </td>
+      </tr>`).join('');
+
+    const sourceSectionRows = sourceData.map(s => `
+      <tr>
+        <td>${s.name}</td>
+        <td style="text-align:right; font-weight:700; color:#16a34a">${fmt(s.total)}</td>
+        <td style="text-align:right; color:#6b7280">${totalIncome > 0 ? Math.round(s.total / totalIncome * 100) : 0}%</td>
+      </tr>`).join('');
+
+    const expenseSectionRows = expenseCategoryData.map(c => `
+      <tr>
+        <td>${c.name}</td>
+        <td style="text-align:right; font-weight:700; color:#ef4444">-${fmt(c.total)}</td>
+        <td style="text-align:right; color:#6b7280">${totalExpense > 0 ? Math.round(c.total / totalExpense * 100) : 0}%</td>
+      </tr>`).join('');
+
+    const transactionRows = sortedItems.map(item => {
+      const isExpense = item.type === 'expense';
+      const typeLabel = item.type === 'income' ? 'Ingreso' : item.type === 'extra' ? 'Extra' : 'Gasto';
+      const typeColor = item.type === 'income' ? '#4f46e5' : item.type === 'extra' ? '#f97316' : '#ef4444';
+      return `
+        <tr>
+          <td>${new Date(item.date + 'T00:00:00').toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
+          <td><span style="background:${typeColor}1a; color:${typeColor}; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700">${typeLabel}</span></td>
+          <td>${item.description}</td>
+          <td style="text-align:right; font-weight:700; color:${isExpense ? '#ef4444' : '#16a34a'}">
+            ${isExpense ? '-' : '+'}${fmt(item.amount)}
+          </td>
+        </tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Informe Monty — ${generatedAt}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #111827; background: #fff; font-size: 13px; }
+    .page { max-width: 780px; margin: 0 auto; padding: 40px 32px; }
+
+    /* Header */
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 2px solid #e5e7eb; }
+    .header-left h1 { font-size: 28px; font-weight: 900; letter-spacing: -1px; color: #111827; }
+    .header-left p { color: #6b7280; font-size: 13px; margin-top: 4px; }
+    .header-right { text-align: right; }
+    .header-right .period { font-size: 12px; color: #6b7280; }
+    .header-right .generated { font-size: 11px; color: #9ca3af; margin-top: 4px; }
+
+    /* Summary cards */
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 32px; }
+    .card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; }
+    .card .label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #9ca3af; margin-bottom: 6px; }
+    .card .value { font-size: 18px; font-weight: 900; }
+    .card.net { background: #eef2ff; border-color: #c7d2fe; }
+    .card.net .value { color: #4f46e5; }
+
+    /* Sections */
+    .section { margin-bottom: 28px; page-break-inside: avoid; }
+    .section h2 { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: #9ca3af; margin-bottom: 12px; }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; }
+    th { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; color: #9ca3af; padding: 8px 12px; border-bottom: 2px solid #e5e7eb; text-align: left; }
+    td { padding: 9px 12px; border-bottom: 1px solid #f3f4f6; font-size: 13px; color: #374151; }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: #f9fafb; }
+
+    /* Net total row */
+    .net-row td { border-top: 2px solid #e5e7eb; font-weight: 800; font-size: 14px; color: #4f46e5; padding-top: 12px; }
+
+    /* Footer */
+    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+    .footer .brand { font-size: 11px; color: #9ca3af; }
+    .footer .brand strong { background: linear-gradient(90deg, #2563eb, #a855f7, #22c55e); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; }
+    .footer .page-info { font-size: 11px; color: #9ca3af; }
+
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .page { padding: 20px 24px; }
+      .section { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <h1>Monty</h1>
+      <p>Informe de Ingresos y Gastos</p>
+    </div>
+    <div class="header-right">
+      <div class="period">Período: ${firstDate} — ${lastDate}</div>
+      <div class="generated">Generado el ${generatedAt}</div>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="summary">
+    <div class="card">
+      <div class="label">Ingresos Trabajo</div>
+      <div class="value" style="color:#16a34a">${fmt(totalIncome)}</div>
+    </div>
+    <div class="card">
+      <div class="label">Ingresos Extra</div>
+      <div class="value" style="color:#f97316">${fmt(totalExtra)}</div>
+    </div>
+    <div class="card">
+      <div class="label">Gastos</div>
+      <div class="value" style="color:#ef4444">-${fmt(totalExpense)}</div>
+    </div>
+    <div class="card net">
+      <div class="label">Neto Total</div>
+      <div class="value">${fmt(totalNet)}</div>
+    </div>
+  </div>
+
+  ${weeklyData.some(d => d.net !== 0) ? `
+  <!-- Últimos 7 días -->
+  <div class="section">
+    <h2>Últimos 7 días</h2>
+    <table>
+      <thead><tr><th>Día</th><th style="text-align:right">Neto</th></tr></thead>
+      <tbody>${weeklySectionRows}</tbody>
+      <tfoot>
+        <tr class="net-row">
+          <td>Total semana</td>
+          <td style="text-align:right">${fmt(weeklyData.reduce((s, d) => s + d.net, 0))}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>` : ''}
+
+  ${sourceData.length > 0 ? `
+  <!-- Por plataforma -->
+  <div class="section">
+    <h2>Ingresos por Plataforma</h2>
+    <table>
+      <thead><tr><th>Plataforma</th><th style="text-align:right">Total</th><th style="text-align:right">%</th></tr></thead>
+      <tbody>${sourceSectionRows}</tbody>
+    </table>
+  </div>` : ''}
+
+  ${expenseCategoryData.length > 0 ? `
+  <!-- Gastos por categoría -->
+  <div class="section">
+    <h2>Gastos por Categoría</h2>
+    <table>
+      <thead><tr><th>Categoría</th><th style="text-align:right">Total</th><th style="text-align:right">%</th></tr></thead>
+      <tbody>${expenseSectionRows}</tbody>
+    </table>
+  </div>` : ''}
+
+  ${sortedItems.length > 0 ? `
+  <!-- Historial completo -->
+  <div class="section">
+    <h2>Historial Completo (${sortedItems.length} movimientos)</h2>
+    <table>
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th style="text-align:right">Monto</th></tr></thead>
+      <tbody>${transactionRows}</tbody>
+    </table>
+  </div>` : ''}
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="brand">Desarrollado por <strong>Teo Labs</strong> ®</div>
+    <div class="page-info">Monty — informe generado en tiempo real</div>
+  </div>
+
+</div>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank');
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => win.print(), 600);
   };
 
   // ─── Render ───────────────────────────────────────────────────
@@ -509,12 +703,12 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
               </div>
             </div>
 
-            {/* Exportar CSV */}
+            {/* Exportar PDF */}
             <button
-              onClick={exportCSV}
-              className="w-full flex items-center justify-center gap-3 bg-white border-2 border-dashed border-gray-200 text-gray-500 font-bold py-4 rounded-[2rem] hover:border-indigo-300 hover:text-indigo-600 transition"
+              onClick={exportPDF}
+              className="w-full flex items-center justify-center gap-3 bg-indigo-600 text-white font-bold py-4 rounded-[2rem] hover:bg-indigo-700 active:scale-95 transition-all shadow-lg shadow-indigo-200"
             >
-              <Download className="w-5 h-5" /> Exportar CSV
+              <Download className="w-5 h-5" /> Descargar Informe PDF
             </button>
           </div>
         )}

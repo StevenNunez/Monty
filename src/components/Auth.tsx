@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { LogIn, UserPlus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
+import InteractiveLogo from './InteractiveLogo';
 
 export default function Auth() {
   const [loading, setLoading] = useState(false);
@@ -29,8 +30,8 @@ export default function Auth() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
-      <motion.div 
+    <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 p-4">
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md space-y-8 rounded-3xl bg-white p-8 shadow-xl"
@@ -99,6 +100,24 @@ export default function Auth() {
           </button>
         </div>
       </motion.div>
+
+      <motion.footer
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.4 }}
+        className="mt-6 flex items-center gap-1.5 text-xs text-gray-400"
+      >
+        <span>Desarrollado por</span>
+        <a
+          href="https://www.teolabs.app"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:opacity-80 transition-opacity"
+        >
+          <InteractiveLogo variant="footer-small" className="text-[13px]" />
+        </a>
+        <span>®</span>
+      </motion.footer>
     </div>
   );
 }
