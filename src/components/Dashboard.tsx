@@ -1,20 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { DailyEntry, ExtraIncome, UserGoal, Budget, Expense } from '../types';
+import { DailyEntry, ExtraIncome, UserGoal, Budget, Expense, CreditInstallment } from '../types';
 import { calculateStats } from '../lib/calculations';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion } from 'motion/react';
-import { TrendingUp, TrendingDown, Target, Zap, Plus, ShoppingCart } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Zap, Plus, ShoppingCart, Bell } from 'lucide-react';
 import IncomeForm from './IncomeForm';
 import GoalManager from './GoalManager';
 import ExtraIncomeForm from './ExtraIncomeForm';
 import ExpenseForm from './ExpenseForm';
 import BudgetManager from './BudgetManager';
+import InstallmentManager from './InstallmentManager';
 import History from './History';
 import BudgetView from './BudgetView';
 import DashboardSkeleton from './DashboardSkeleton';
 import ProgressRing from './ProgressRing';
+
+const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 export default function Dashboard({
   user,
@@ -30,6 +33,7 @@ export default function Dashboard({
   const [extraIncomes, setExtraIncomes] = useState<ExtraIncome[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [installments, setInstallments] = useState<CreditInstallment[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [dbError, setDbError] = useState<string | null>(null);
   const [showIncomeForm, setShowIncomeForm] = useState(false);
@@ -37,9 +41,23 @@ export default function Dashboard({
   const [showExtraForm, setShowExtraForm] = useState(false);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [showBudgetManager, setShowBudgetManager] = useState(false);
+  const [showInstallmentManager, setShowInstallmentManager] = useState(false);
+  const [installmentToPay, setInstallmentToPay] = useState<CreditInstallment | null>(null);
   const [showBencinaPrompt, setShowBencinaPrompt] = useState(false);
   const [showBencinaExpenseForm, setShowBencinaExpenseForm] = useState(false);
   const [bencinaDate, setBencinaDate] = useState('');
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | null>(null);
+
+  const today = useMemo(() => new Date(), []);
+
+  const upcomingPayments = useMemo(() => {
+    const currentDay = today.getDate();
+    return budgets
+      .filter(b => b.due_day != null)
+      .map(b => ({ ...b, diff: (b.due_day as number) - currentDay }))
+      .filter(b => b.diff >= 0 && b.diff <= 5)
+      .sort((a, b) => a.diff - b.diff);
+  }, [budgets, today]);
 
   const stats = useMemo(
     () => calculateStats(goal, dailyEntries, extraIncomes, expenses, budgets),
@@ -50,14 +68,40 @@ export default function Dashboard({
     if (activeTab === 'settings') setShowGoalManager(true);
   }, [activeTab]);
 
+  useEffect(() => {
+    if ('Notification' in window) setNotificationPermission(Notification.permission);
+  }, []);
+
+  useEffect(() => {
+    if (initialLoading || !upcomingPayments.length) return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const todayStr = today.toDateString();
+    if (localStorage.getItem('monty_notif_date') === todayStr) return;
+    localStorage.setItem('monty_notif_date', todayStr);
+    upcomingPayments.forEach(p => {
+      const msg = p.diff === 0 ? '¡Vence hoy!' : p.diff === 1 ? 'Vence mañana' : `Vence en ${p.diff} días`;
+      new Notification(`💳 ${p.category}`, {
+        body: `${msg} · ${formatCurrency(Number(p.amount))}`,
+        icon: '/favicon.ico',
+      });
+    });
+  }, [initialLoading, upcomingPayments, today]);
+
+  const requestNotificationPermission = async () => {
+    if (!('Notification' in window)) return;
+    const perm = await Notification.requestPermission();
+    setNotificationPermission(perm);
+  };
+
   const fetchData = async () => {
     try {
-      const [goalRes, entriesRes, extraRes, expensesRes, budgetsRes] = await Promise.all([
+      const [goalRes, entriesRes, extraRes, expensesRes, budgetsRes, installmentsRes] = await Promise.all([
         supabase.from('goals').select('*').eq('user_id', user.id).maybeSingle(),
         supabase.from('daily_entries').select('*').eq('user_id', user.id),
         supabase.from('extra_income').select('*').eq('user_id', user.id),
         supabase.from('expenses').select('*').eq('user_id', user.id),
         supabase.from('budgets').select('*').eq('user_id', user.id),
+        supabase.from('credit_installments').select('*').eq('user_id', user.id),
       ]);
 
       if (goalRes.error && goalRes.error.code !== 'PGRST116') throw goalRes.error;
@@ -65,12 +109,14 @@ export default function Dashboard({
       if (extraRes.error) throw extraRes.error;
       if (expensesRes.error) throw expensesRes.error;
       if (budgetsRes.error) throw budgetsRes.error;
+      if (installmentsRes.error) throw installmentsRes.error;
 
       if (goalRes.data) setGoal(goalRes.data);
       setDailyEntries(entriesRes.data || []);
       setExtraIncomes(extraRes.data || []);
       setExpenses(expensesRes.data || []);
       setBudgets(budgetsRes.data || []);
+      setInstallments(installmentsRes.data || []);
       setDbError(null);
     } catch (err: any) {
       console.error('Database fetch error:', err);
@@ -88,6 +134,7 @@ export default function Dashboard({
       supabase.channel('extras').on('postgres_changes', { event: '*', schema: 'public', table: 'extra_income', filter: `user_id=eq.${user.id}` }, () => fetchData()).subscribe(),
       supabase.channel('expenses').on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `user_id=eq.${user.id}` }, () => fetchData()).subscribe(),
       supabase.channel('budgets').on('postgres_changes', { event: '*', schema: 'public', table: 'budgets', filter: `user_id=eq.${user.id}` }, () => fetchData()).subscribe(),
+      supabase.channel('installments').on('postgres_changes', { event: '*', schema: 'public', table: 'credit_installments', filter: `user_id=eq.${user.id}` }, () => fetchData()).subscribe(),
     ];
     return () => channels.forEach(channel => supabase.removeChannel(channel));
   }, [user.id]);
@@ -100,8 +147,12 @@ export default function Dashboard({
           budgets={budgets}
           balances={stats.categoryBalances}
           unplannedSpent={stats.unplannedSpent}
+          installments={installments}
+          allExpenses={expenses}
           onManageBudgets={() => setShowBudgetManager(true)}
           onManageGoals={() => setShowGoalManager(true)}
+          onAddInstallment={() => setShowInstallmentManager(true)}
+          onPayInstallment={(inst) => setInstallmentToPay(inst)}
         />
       );
     }
@@ -114,6 +165,41 @@ export default function Dashboard({
           <div className="mb-6 p-4 bg-red-50 border border-red-100 text-red-700 rounded-2xl text-sm font-medium">
             ⚠️ {dbError}
           </div>
+        )}
+
+        {/* Banner pagos próximos */}
+        {upcomingPayments.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-5 rounded-2xl bg-amber-50 border border-amber-200 p-4"
+          >
+            <div className="flex items-start gap-3">
+              <Bell className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-amber-800 mb-1.5">
+                  {upcomingPayments.length === 1 ? '1 pago próximo' : `${upcomingPayments.length} pagos próximos`}
+                </p>
+                {upcomingPayments.map(p => (
+                  <p key={p.id} className="text-xs text-amber-700 font-medium leading-relaxed">
+                    • <span className="capitalize font-bold">{p.category}</span>: {formatCurrency(Number(p.amount))} —{' '}
+                    <span className={p.diff === 0 ? 'text-red-600 font-black' : ''}>
+                      {p.diff === 0 ? '¡Hoy!' : p.diff === 1 ? 'mañana' : `en ${p.diff} días`}
+                    </span>
+                  </p>
+                ))}
+              </div>
+              {notificationPermission !== 'granted' && 'Notification' in window && notificationPermission !== 'denied' && (
+                <button
+                  onClick={requestNotificationPermission}
+                  title="Activar notificaciones"
+                  className="flex-shrink-0 p-2 bg-amber-100 text-amber-600 rounded-xl hover:bg-amber-200 transition active:scale-95"
+                >
+                  <Bell className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </motion.div>
         )}
 
         {/* Onboarding — sin meta configurada */}
@@ -145,7 +231,12 @@ export default function Dashboard({
             className="mb-6 rounded-[2.5rem] bg-indigo-600 p-8 shadow-xl text-white relative overflow-hidden"
           >
             <div className="relative z-10 text-center">
-              <span className="text-indigo-100 text-sm font-medium uppercase tracking-widest opacity-80 block mb-2">Saldo Libre Mensual</span>
+              <div className="inline-block bg-white/20 rounded-full px-4 py-1 mb-3">
+                <span className="text-white text-xs font-bold uppercase tracking-widest">
+                  {MONTHS_ES[today.getMonth()]} {today.getFullYear()}
+                </span>
+              </div>
+              <span className="text-indigo-100 text-sm font-medium uppercase tracking-widest opacity-80 block mb-2">Saldo Libre</span>
               <h2 className="text-6xl font-black mb-6 tracking-tighter">
                 {formatCurrency(stats.totalRemaining)}
               </h2>
@@ -248,7 +339,7 @@ export default function Dashboard({
             </div>
             <div className="flex justify-between items-center">
               <div>
-                <span className="text-[9px] text-gray-400 font-bold uppercase block">Facturado</span>
+                <span className="text-[9px] text-gray-400 font-bold uppercase block">Ganado</span>
                 <span className="text-sm font-black text-gray-700">{formatCurrency(stats.accumulatedIncome)}</span>
               </div>
               <div className="text-right">
@@ -312,6 +403,25 @@ export default function Dashboard({
           budgets={budgets}
           onClose={() => setShowBudgetManager(false)}
           onRefresh={fetchData}
+        />
+      )}
+      {showInstallmentManager && (
+        <InstallmentManager
+          user={user}
+          installments={installments}
+          onClose={() => setShowInstallmentManager(false)}
+          onRefresh={fetchData}
+        />
+      )}
+      {installmentToPay && (
+        <ExpenseForm
+          user={user}
+          categories={budgets.map(b => b.category)}
+          defaultCategory={installmentToPay.description}
+          defaultAmount={installmentToPay.installment_amount}
+          defaultIsUnplanned={true}
+          onClose={() => setInstallmentToPay(null)}
+          onRefresh={() => { fetchData(); setInstallmentToPay(null); }}
         />
       )}
 

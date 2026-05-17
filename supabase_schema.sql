@@ -103,3 +103,22 @@ DO $$ BEGIN
   CREATE POLICY "Users can manage their own budgets" ON budgets
       FOR ALL USING (auth.uid() = user_id);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- 7. Cuotas de tarjeta de crédito
+CREATE TABLE IF NOT EXISTS credit_installments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    description TEXT NOT NULL,
+    total_amount DECIMAL(12,2) NOT NULL,
+    installment_amount DECIMAL(12,2) NOT NULL,
+    total_installments INTEGER NOT NULL CHECK (total_installments >= 1),
+    start_year INTEGER NOT NULL,
+    start_month INTEGER NOT NULL CHECK (start_month BETWEEN 1 AND 12),
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE credit_installments ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  CREATE POLICY "Users can manage their own credit installments" ON credit_installments
+      FOR ALL USING (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

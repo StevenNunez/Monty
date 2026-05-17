@@ -1,25 +1,64 @@
 import React, { useState } from 'react';
-import { UserGoal, Budget, CategoryBalance } from '../types';
+import { UserGoal, Budget, CategoryBalance, CreditInstallment, ActiveInstallment, Expense } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion } from 'motion/react';
-import { Wallet, Target, ArrowRight, Plus, PieChart, ShoppingCart, CheckCircle, Clock, Calendar } from 'lucide-react';
+import { Wallet, Target, ArrowRight, Plus, PieChart, ShoppingCart, CheckCircle, Clock, Calendar, CreditCard } from 'lucide-react';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+function getActiveInstallmentsForMonth(
+  installments: CreditInstallment[],
+  allExpenses: Expense[],
+  year: number,
+  month: number
+): ActiveInstallment[] {
+  const monthExp = allExpenses.filter(e => {
+    const d = new Date(e.date + 'T00:00:00');
+    return d.getFullYear() === year && d.getMonth() + 1 === month;
+  });
+
+  return installments
+    .map(inst => {
+      const monthsDiff = (year - inst.start_year) * 12 + (month - inst.start_month);
+      const current_installment = monthsDiff + 1;
+      if (current_installment < 1 || current_installment > inst.total_installments) return null;
+
+      const amount_paid = monthExp
+        .filter(e => e.category.trim().toLowerCase() === inst.description.trim().toLowerCase())
+        .reduce((sum, e) => sum + Number(e.amount), 0);
+
+      return {
+        ...inst,
+        current_installment,
+        is_paid: amount_paid >= Number(inst.installment_amount),
+        amount_paid,
+      };
+    })
+    .filter((x): x is ActiveInstallment => x !== null);
+}
 
 export default function BudgetView({
   goal,
   budgets,
   balances,
   unplannedSpent,
+  installments,
+  allExpenses,
   onManageBudgets,
-  onManageGoals
+  onManageGoals,
+  onAddInstallment,
+  onPayInstallment,
 }: {
   goal: UserGoal | null;
   budgets: Budget[];
   balances: CategoryBalance[];
   unplannedSpent: number;
+  installments: CreditInstallment[];
+  allExpenses: Expense[];
   onManageBudgets: () => void;
   onManageGoals: () => void;
+  onAddInstallment: () => void;
+  onPayInstallment: (inst: CreditInstallment) => void;
 }) {
   const [viewingNextMonth, setViewingNextMonth] = useState(false);
 
@@ -27,7 +66,18 @@ export default function BudgetView({
   const currentMonthName = MONTHS_ES[today.getMonth()];
   const nextMonthName = MONTHS_ES[(today.getMonth() + 1) % 12];
 
-  const totalBudgeted = budgets.reduce((sum, b) => sum + Number(b.amount), 0);
+  // Determine the year/month being viewed
+  const viewYear = viewingNextMonth
+    ? (today.getMonth() === 11 ? today.getFullYear() + 1 : today.getFullYear())
+    : today.getFullYear();
+  const viewMonth = viewingNextMonth
+    ? (today.getMonth() === 11 ? 1 : today.getMonth() + 2)
+    : (today.getMonth() + 1);
+
+  const activeInstallments = getActiveInstallmentsForMonth(installments, allExpenses, viewYear, viewMonth);
+  const totalInstallmentsAmount = activeInstallments.reduce((s, i) => s + Number(i.installment_amount), 0);
+
+  const totalBudgeted = budgets.reduce((sum, b) => sum + Number(b.amount), 0) + totalInstallmentsAmount;
   const monthlyIncome = goal?.monthly_target || 0;
   const theoreticalFree = monthlyIncome - totalBudgeted;
   const currentFreeBalance = theoreticalFree - unplannedSpent;
@@ -36,6 +86,8 @@ export default function BudgetView({
   const scheduledBudgets = budgets
     .filter(b => b.due_day != null)
     .sort((a, b) => (a.due_day ?? 0) - (b.due_day ?? 0));
+
+  const hasScheduledItems = scheduledBudgets.length > 0 || activeInstallments.length > 0;
 
   const getBalanceFor = (category: string) =>
     balances.find(bl => bl.category.trim().toLowerCase() === category.trim().toLowerCase());
@@ -53,7 +105,6 @@ export default function BudgetView({
     const dueDay = budget.due_day;
 
     if (viewingNextMonth) {
-      // Days from today until due_day of next month
       const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
       const diffDays = Math.ceil((nextMonth.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       if (diffDays === 1) return { label: 'Mañana', urgent: true };
@@ -74,9 +125,18 @@ export default function BudgetView({
           <h2 className="text-3xl font-extrabold text-gray-900 tracking-tight">Mi Plan Mensual</h2>
           <p className="text-gray-500">Gestión de meta y gastos fijos</p>
         </div>
-        <button onClick={onManageBudgets} className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl hover:bg-indigo-100 transition">
-          <Plus className="w-5 h-5" />
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={onAddInstallment}
+            className="p-3 bg-purple-50 text-purple-600 rounded-2xl hover:bg-purple-100 transition"
+            title="Gestionar cuotas"
+          >
+            <CreditCard className="w-5 h-5" />
+          </button>
+          <button onClick={onManageBudgets} className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl hover:bg-indigo-100 transition">
+            <Plus className="w-5 h-5" />
+          </button>
+        </div>
       </header>
 
       {/* Summary Card */}
@@ -105,6 +165,11 @@ export default function BudgetView({
               <div>
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-widest block">Presupuestado Fijo</span>
                 <span className="text-xl font-bold">{formatCurrency(totalBudgeted)}</span>
+                {totalInstallmentsAmount > 0 && (
+                  <span className="text-[10px] text-purple-500 font-bold block">
+                    Incl. {formatCurrency(totalInstallmentsAmount)} en cuotas
+                  </span>
+                )}
               </div>
             </div>
             <ArrowRight className="w-4 h-4 text-gray-300" />
@@ -123,12 +188,11 @@ export default function BudgetView({
         </div>
       </div>
 
-      {/* Próximos Pagos — solo si hay presupuestos con día de pago */}
-      {scheduledBudgets.length > 0 && (
+      {/* Próximos Pagos */}
+      {hasScheduledItems && (
         <section>
           <div className="flex justify-between items-center mb-4 px-2">
             <h3 className="text-lg font-bold text-gray-800">Próximos Pagos</h3>
-            {/* Month toggle */}
             <div className="flex items-center bg-gray-100 rounded-2xl p-1">
               <button
                 onClick={() => setViewingNextMonth(false)}
@@ -152,6 +216,7 @@ export default function BudgetView({
           </div>
 
           <div className="space-y-3">
+            {/* Scheduled budgets */}
             {scheduledBudgets.map((budget, i) => {
               const status = getPaymentStatus(budget);
               const { label: daysLabel, urgent } = getDaysLabel(budget);
@@ -172,7 +237,6 @@ export default function BudgetView({
                         : "bg-white border-gray-100 shadow-sm"
                   )}
                 >
-                  {/* Status icon */}
                   <div className={cn(
                     "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
                     status === 'paid'   ? "bg-green-100 text-green-600" :
@@ -185,7 +249,6 @@ export default function BudgetView({
                     }
                   </div>
 
-                  {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-gray-800 capitalize">{budget.category}</span>
@@ -212,7 +275,6 @@ export default function BudgetView({
                     )}
                   </div>
 
-                  {/* Amount */}
                   <div className="text-right flex-shrink-0">
                     <span className={cn(
                       "text-lg font-black",
@@ -224,6 +286,66 @@ export default function BudgetView({
                 </motion.div>
               );
             })}
+
+            {/* Active installments */}
+            {activeInstallments.map((inst, i) => (
+              <motion.div
+                key={inst.id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: (scheduledBudgets.length + i) * 0.05 }}
+                className={cn(
+                  "flex items-center gap-4 p-4 rounded-2xl border",
+                  inst.is_paid
+                    ? "bg-green-50 border-green-100"
+                    : "bg-purple-50 border-purple-100"
+                )}
+              >
+                <div className={cn(
+                  "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
+                  inst.is_paid ? "bg-green-100 text-green-600" : "bg-purple-100 text-purple-600"
+                )}>
+                  {inst.is_paid ? <CheckCircle className="w-5 h-5" /> : <CreditCard className="w-5 h-5" />}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-gray-800 capitalize">{inst.description}</span>
+                    <span className="text-[9px] font-black uppercase tracking-widest text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full">
+                      Cuota {inst.current_installment}/{inst.total_installments}
+                    </span>
+                    {inst.is_paid && (
+                      <span className="text-[9px] font-black uppercase tracking-widest text-green-600 bg-green-100 px-2 py-0.5 rounded-full">Pagado</span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-gray-400 font-bold mt-0.5">
+                    Total {formatCurrency(inst.total_amount)} en {inst.total_installments} cuotas
+                  </div>
+                  {inst.amount_paid > 0 && !inst.is_paid && (
+                    <p className="text-[10px] text-orange-500 font-bold mt-0.5">
+                      Pagado {formatCurrency(inst.amount_paid)} de {formatCurrency(inst.installment_amount)}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                  <span className={cn(
+                    "text-lg font-black",
+                    inst.is_paid ? "text-green-600" : "text-purple-700"
+                  )}>
+                    {formatCurrency(Number(inst.installment_amount))}
+                  </span>
+                  {!inst.is_paid && !viewingNextMonth && (
+                    <button
+                      onClick={() => onPayInstallment(inst)}
+                      className="text-[10px] font-black uppercase tracking-widest text-white bg-purple-600 px-3 py-1 rounded-full hover:bg-purple-700 transition active:scale-95"
+                    >
+                      Pagar
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            ))}
           </div>
         </section>
       )}

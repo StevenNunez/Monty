@@ -15,6 +15,7 @@ interface ExpenseFormProps {
   defaultCategory?: string;
   defaultDate?: string;
   defaultIsUnplanned?: boolean;
+  defaultAmount?: number;
 }
 
 export default function ExpenseForm({
@@ -25,10 +26,11 @@ export default function ExpenseForm({
   defaultCategory,
   defaultDate,
   defaultIsUnplanned,
+  defaultAmount,
 }: ExpenseFormProps) {
   const resolvedIsUnplanned = defaultIsUnplanned ?? categories.length === 0;
 
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(defaultAmount ? String(defaultAmount) : '');
   const [category, setCategory] = useState(defaultCategory && categories.includes(defaultCategory) ? defaultCategory : (categories[0] || ''));
   const [isUnplanned, setIsUnplanned] = useState(resolvedIsUnplanned);
   const [customCategory, setCustomCategory] = useState(resolvedIsUnplanned && defaultCategory ? defaultCategory : '');

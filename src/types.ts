@@ -54,6 +54,24 @@ export interface CategoryBalance {
   remaining: number;
 }
 
+export interface CreditInstallment {
+  id: string;
+  user_id: string;
+  description: string;
+  total_amount: number;
+  installment_amount: number;
+  total_installments: number;
+  start_year: number;
+  start_month: number;
+  created_at?: string;
+}
+
+export interface ActiveInstallment extends CreditInstallment {
+  current_installment: number;
+  is_paid: boolean;
+  amount_paid: number;
+}
+
 export interface DashboardStats {
   netToday: number;
   dailyTarget: number;
