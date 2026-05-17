@@ -10,12 +10,14 @@ import Dashboard from './components/Dashboard';
 import Auth from './components/Auth';
 import Navigation from './components/Navigation';
 import InteractiveLogo from './components/InteractiveLogo';
+import SetNewPassword from './components/SetNewPassword';
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentTab, setCurrentTab] = useState<'home' | 'history' | 'budget' | 'settings'>('home');
+  const [resetMode, setResetMode] = useState(false);
 
   useEffect(() => {
     const initSession = async () => {
@@ -35,8 +37,14 @@ export default function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setResetMode(true);
+        setSession(session);
+      } else {
+        setResetMode(false);
+        setSession(session);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -70,6 +78,10 @@ export default function App() {
         </div>
       </div>
     );
+  }
+
+  if (resetMode && session) {
+    return <SetNewPassword onDone={() => setResetMode(false)} />;
   }
 
   if (!session) {

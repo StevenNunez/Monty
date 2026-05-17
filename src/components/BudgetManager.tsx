@@ -40,8 +40,7 @@ export default function BudgetManager({ user, budgets, onClose, onRefresh }: { u
         .update({
           category: trimmedCategory,
           amount: Number(newAmount),
-          due_day,
-          updated_at: new Date().toISOString()
+          due_day
         })
         .eq('id', editingId);
 

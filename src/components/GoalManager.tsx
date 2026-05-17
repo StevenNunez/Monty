@@ -40,8 +40,7 @@ export default function GoalManager({ user, currentGoal, onClose, onRefresh }: {
       user_id: user.id,
       monthly_target: monthlyTarget,
       yearly_target: yearlyTarget,
-      working_days: workingDays,
-      updated_at: new Date().toISOString()
+      working_days: workingDays
     }, { onConflict: 'user_id' });
 
     if (error) {
