@@ -114,11 +114,48 @@ CREATE TABLE IF NOT EXISTS credit_installments (
     total_installments INTEGER NOT NULL CHECK (total_installments >= 1),
     start_year INTEGER NOT NULL,
     start_month INTEGER NOT NULL CHECK (start_month BETWEEN 1 AND 12),
+    due_day INTEGER CHECK (due_day BETWEEN 1 AND 31),
     created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Migración: agrega due_day si la tabla ya existía sin esa columna
+ALTER TABLE credit_installments ADD COLUMN IF NOT EXISTS due_day INTEGER CHECK (due_day BETWEEN 1 AND 31);
 
 ALTER TABLE credit_installments ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
   CREATE POLICY "Users can manage their own credit installments" ON credit_installments
+      FOR ALL USING (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- 8. Grupos de gastos (viajes, eventos, etc.)
+CREATE TABLE IF NOT EXISTS expense_groups (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    name TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE expense_groups ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  CREATE POLICY "Users can manage their own expense groups" ON expense_groups
+      FOR ALL USING (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- 9. Ítems dentro de grupos de gastos
+CREATE TABLE IF NOT EXISTS expense_group_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_id UUID REFERENCES expense_groups(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    description TEXT NOT NULL,
+    amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    date DATE DEFAULT CURRENT_DATE,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE expense_group_items ADD COLUMN IF NOT EXISTS date DATE DEFAULT CURRENT_DATE;
+
+ALTER TABLE expense_group_items ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  CREATE POLICY "Users can manage their own expense group items" ON expense_group_items
       FOR ALL USING (auth.uid() = user_id);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;

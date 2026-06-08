@@ -8,7 +8,9 @@
       "PowerShell(Get-ChildItem -Path \"C:\\\\TeoLabs\\\\Monty\" -Force | Select-Object Name, @{Name='Type';Expression={if\\($_.PSIsContainer\\){'Dir'}else{'File'}}} | Sort-Object Name)",
       "PowerShell(Get-Content \"C:\\\\TeoLabs\\\\Monty\\\\vite.config.ts\" | ForEach-Object { [System.Text.Encoding]::Unicode.GetBytes\\($_\\) | ForEach-Object { $_.ToString\\(\"X2\"\\) } | Select-Object -First 5 | Join-String -Separator \" \" })",
       "Bash(awk '{print $NF}')",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(git *)",
+      "Bash(dir C:TeoLabsMontysrccomponents *)"
     ]
   }
 }

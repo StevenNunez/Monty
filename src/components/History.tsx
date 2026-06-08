@@ -1,37 +1,121 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { formatCurrency, cn } from '../lib/utils';
-import { X, ArrowUpRight, ArrowDownRight, Gift, ChevronLeft, ChevronRight, Trash2, Save, RefreshCw, Download, BarChart2, CalendarDays } from 'lucide-react';
+import { formatCurrency, cn, localDateStr } from '../lib/utils';
+import { X, ArrowUpRight, ArrowDownRight, Gift, ChevronLeft, ChevronRight, ChevronDown, Trash2, Save, RefreshCw, Download, BarChart2, CalendarDays, Package, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { ExpenseGroup } from '../types';
 
 interface HistoryItem {
   id: string;
-  type: 'income' | 'expense' | 'extra';
+  type: 'income' | 'expense' | 'extra' | 'group_expense';
   amount: number;
   description: string;
   date: string;
+  groupName?: string;
 }
 
 export default function History({ userId, onClose, onRefresh }: { userId: string; onClose: () => void; onRefresh?: () => void }) {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(localDateStr());
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [activeView, setActiveView] = useState<'movimientos' | 'analisis'>('movimientos');
+  const [activeView, setActiveView] = useState<'movimientos' | 'analisis' | 'grupos'>('movimientos');
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  const [expenseGroups, setExpenseGroups] = useState<ExpenseGroup[]>([]);
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+  const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
+  const [addingItemToGroupId, setAddingItemToGroupId] = useState<string | null>(null);
+  const [newItemDesc, setNewItemDesc] = useState('');
+  const [newItemAmt, setNewItemAmt] = useState('');
+  const [newItemDate, setNewItemDate] = useState(localDateStr());
+  const [savingItem, setSavingItem] = useState(false);
+  const [saveItemError, setSaveItemError] = useState<string | null>(null);
+
+  const fetchGroups = async () => {
+    const { data } = await supabase
+      .from('expense_groups')
+      .select('*, expense_group_items(*)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    setExpenseGroups(data || []);
+  };
+
+  const handleAddItemToGroup = async (groupId: string) => {
+    if (!newItemDesc.trim() || Number(newItemAmt) <= 0) return;
+    setSavingItem(true);
+    setSaveItemError(null);
+
+    const payload: Record<string, unknown> = {
+      group_id: groupId,
+      user_id: userId,
+      description: newItemDesc.trim(),
+      amount: Number(newItemAmt),
+    };
+    if (newItemDate) payload.date = newItemDate;
+
+    const { error } = await supabase.from('expense_group_items').insert(payload);
+
+    if (!error) {
+      setNewItemDesc('');
+      setNewItemAmt('');
+      setNewItemDate(localDateStr());
+      setAddingItemToGroupId(null);
+      setSaveItemError(null);
+      fetchGroups();
+    } else {
+      // Si falló por la columna date (tabla sin la migración), reintentar sin date
+      if (error.message?.includes('date') || error.code === '42703') {
+        const { error: error2 } = await supabase.from('expense_group_items').insert({
+          group_id: groupId,
+          user_id: userId,
+          description: newItemDesc.trim(),
+          amount: Number(newItemAmt),
+        });
+        if (!error2) {
+          setNewItemDesc('');
+          setNewItemAmt('');
+          setNewItemDate(localDateStr());
+          setAddingItemToGroupId(null);
+          setSaveItemError(null);
+          fetchGroups();
+        } else {
+          setSaveItemError(error2.message);
+        }
+      } else {
+        setSaveItemError(error.message);
+      }
+    }
+    setSavingItem(false);
+  };
+
+  const handleDeleteGroup = async (groupId: string) => {
+    if (deletingGroupId !== groupId) {
+      setDeletingGroupId(groupId);
+      setTimeout(() => setDeletingGroupId(null), 3000);
+      return;
+    }
+    const { error } = await supabase.from('expense_groups').delete().eq('id', groupId);
+    if (!error) {
+      setDeletingGroupId(null);
+      setExpandedGroupId(null);
+      fetchGroups();
+    }
+  };
+
   const fetchHistory = async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
 
-    const [entries, expenses, extras] = await Promise.all([
+    const [entries, expenses, extras, groupItems] = await Promise.all([
       supabase.from('daily_entries').select('*, income_sources(name)').eq('user_id', userId),
       supabase.from('expenses').select('*').eq('user_id', userId),
       supabase.from('extra_income').select('*').eq('user_id', userId),
+      supabase.from('expense_group_items').select('*, expense_groups(name)').eq('user_id', userId),
     ]);
 
     const history: HistoryItem[] = [
@@ -55,7 +139,19 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
         amount: Number(e.amount),
         description: `Extra: ${e.type}`,
         date: e.date
-      }))
+      })),
+      ...(groupItems.data || []).map(item => {
+        const groupName = (item.expense_groups as { name: string } | null)?.name ?? 'Grupo';
+        const itemDate = item.date || item.created_at?.split('T')[0] || localDateStr();
+        return {
+          id: item.id,
+          type: 'group_expense' as const,
+          amount: Number(item.amount),
+          description: item.description,
+          date: itemDate,
+          groupName,
+        };
+      }),
     ];
 
     setItems(history);
@@ -63,7 +159,7 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
     setRefreshing(false);
   };
 
-  useEffect(() => { fetchHistory(); }, [userId]);
+  useEffect(() => { fetchHistory(); fetchGroups(); }, [userId]);
 
   const handleUpdateAmount = async (item: HistoryItem) => {
     const newAmount = Number(editAmount);
@@ -74,6 +170,7 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
     if (item.type === 'income') { table = 'daily_entries'; column = 'net_income'; }
     else if (item.type === 'expense') table = 'expenses';
     else if (item.type === 'extra') table = 'extra_income';
+    else if (item.type === 'group_expense') table = 'expense_group_items';
 
     const updatePayload: Record<string, number> = { [column]: newAmount };
     if (item.type === 'income') {
@@ -95,9 +192,15 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
     if (item.type === 'income') table = 'daily_entries';
     else if (item.type === 'expense') table = 'expenses';
     else if (item.type === 'extra') table = 'extra_income';
+    else if (item.type === 'group_expense') table = 'expense_group_items';
 
     const { error } = await supabase.from(table).delete().eq('id', item.id);
-    if (!error) { setDeletingId(null); fetchHistory(true); onRefresh?.(); }
+    if (!error) {
+      setDeletingId(null);
+      fetchHistory(true);
+      if (item.type === 'group_expense') fetchGroups();
+      onRefresh?.();
+    }
     else alert('Error al eliminar: ' + error.message);
   };
 
@@ -135,7 +238,7 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
             const isSelected = selectedDate === dateStr;
             const hasData = items.some(item => item.date === dateStr);
             const netForDay = items.filter(item => item.date === dateStr)
-              .reduce((sum, item) => item.type === 'expense' ? sum - item.amount : sum + item.amount, 0);
+              .reduce((sum, item) => (item.type === 'expense' || item.type === 'group_expense') ? sum - item.amount : sum + item.amount, 0);
             return (
               <button
                 key={day}
@@ -166,8 +269,8 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
   );
 
   const daySummary = useMemo(() => {
-    const ingresos = filteredItems.filter(i => i.type !== 'expense').reduce((s, i) => s + i.amount, 0);
-    const gastos = filteredItems.filter(i => i.type === 'expense').reduce((s, i) => s + i.amount, 0);
+    const ingresos = filteredItems.filter(i => i.type !== 'expense' && i.type !== 'group_expense').reduce((s, i) => s + i.amount, 0);
+    const gastos = filteredItems.filter(i => i.type === 'expense' || i.type === 'group_expense').reduce((s, i) => s + i.amount, 0);
     return { ingresos, gastos, neto: ingresos - gastos };
   }, [filteredItems]);
 
@@ -176,14 +279,14 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(today);
       d.setDate(today.getDate() - (6 - i));
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = localDateStr(d);
       const dayItems = items.filter(item => item.date === dateStr);
-      const net = dayItems.reduce((sum, item) => item.type === 'expense' ? sum - item.amount : sum + item.amount, 0);
+      const net = dayItems.reduce((sum, item) => (item.type === 'expense' || item.type === 'group_expense') ? sum - item.amount : sum + item.amount, 0);
       return {
         date: dateStr,
         net,
         label: d.toLocaleDateString('es-CL', { weekday: 'short' }).toUpperCase().slice(0, 2),
-        isToday: dateStr === today.toISOString().split('T')[0],
+        isToday: dateStr === localDateStr(today),
       };
     });
   }, [items]);
@@ -206,6 +309,10 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
     items.filter(item => item.type === 'expense').forEach(item => {
       map.set(item.description, (map.get(item.description) || 0) + item.amount);
     });
+    items.filter(item => item.type === 'group_expense').forEach(item => {
+      const key = item.groupName || 'Grupo';
+      map.set(key, (map.get(key) || 0) + item.amount);
+    });
     return Array.from(map.entries())
       .map(([name, total]) => ({ name, total }))
       .sort((a, b) => b.total - a.total);
@@ -220,7 +327,7 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
 
     const totalIncome  = items.filter(i => i.type === 'income').reduce((s, i) => s + i.amount, 0);
     const totalExtra   = items.filter(i => i.type === 'extra').reduce((s, i) => s + i.amount, 0);
-    const totalExpense = items.filter(i => i.type === 'expense').reduce((s, i) => s + i.amount, 0);
+    const totalExpense = items.filter(i => i.type === 'expense' || i.type === 'group_expense').reduce((s, i) => s + i.amount, 0);
     const totalNet     = totalIncome + totalExtra - totalExpense;
 
     const sortedItems = [...items].sort((a, b) => b.date.localeCompare(a.date));
@@ -260,8 +367,8 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
       </tr>`).join('');
 
     const transactionRows = sortedItems.map(item => {
-      const isExpense = item.type === 'expense';
-      const typeLabel = item.type === 'income' ? 'Ingreso' : item.type === 'extra' ? 'Extra' : 'Gasto';
+      const isExpense = item.type === 'expense' || item.type === 'group_expense';
+      const typeLabel = item.type === 'income' ? 'Ingreso' : item.type === 'extra' ? 'Extra' : item.type === 'group_expense' ? `Grupo: ${item.groupName ?? ''}` : 'Gasto';
       const typeColor = item.type === 'income' ? '#4f46e5' : item.type === 'extra' ? '#f97316' : '#ef4444';
       return `
         <tr>
@@ -465,6 +572,15 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
         >
           <BarChart2 className="w-4 h-4" /> Análisis
         </button>
+        <button
+          onClick={() => { setActiveView('grupos'); fetchGroups(); }}
+          className={cn(
+            "flex items-center gap-2 py-3 px-4 text-sm font-bold border-b-2 transition",
+            activeView === 'grupos' ? "border-violet-600 text-violet-600" : "border-transparent text-gray-400"
+          )}
+        >
+          <Package className="w-4 h-4" /> Grupos
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 pb-12">
@@ -529,15 +645,22 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
                       <div className="flex items-center gap-4">
                         <div className={`p-3 rounded-2xl ${
                           item.type === 'income' ? 'bg-green-50 text-green-600' :
-                          item.type === 'extra' ? 'bg-orange-50 text-orange-600' : 'bg-red-50 text-red-600'
+                          item.type === 'extra' ? 'bg-orange-50 text-orange-600' :
+                          item.type === 'group_expense' ? 'bg-violet-50 text-violet-600' :
+                          'bg-red-50 text-red-600'
                         }`}>
                           {item.type === 'income' ? <ArrowUpRight className="w-5 h-5" /> :
-                           item.type === 'extra' ? <Gift className="w-5 h-5" /> : <ArrowDownRight className="w-5 h-5" />}
+                           item.type === 'extra' ? <Gift className="w-5 h-5" /> :
+                           item.type === 'group_expense' ? <Package className="w-5 h-5" /> :
+                           <ArrowDownRight className="w-5 h-5" />}
                         </div>
                         <div>
                           <span className="font-bold text-gray-800 block text-sm">{item.description}</span>
                           <span className="text-[10px] text-gray-400 uppercase font-black tracking-tighter">
-                            {item.type === 'income' ? 'Ingreso' : item.type === 'extra' ? 'Extra' : 'Gasto'}
+                            {item.type === 'income' ? 'Ingreso' :
+                             item.type === 'extra' ? 'Extra' :
+                             item.type === 'group_expense' ? item.groupName ?? 'Grupo' :
+                             'Gasto'}
                           </span>
                         </div>
                       </div>
@@ -562,9 +685,9 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
                         ) : (
                           <button
                             onClick={() => { setEditingId(item.id); setEditAmount(item.amount.toString()); }}
-                            className={`font-black text-sm ${item.type === 'expense' ? 'text-red-500' : 'text-green-600'}`}
+                            className={`font-black text-sm ${(item.type === 'expense' || item.type === 'group_expense') ? 'text-red-500' : 'text-green-600'}`}
                           >
-                            {item.type === 'expense' ? '-' : '+'}{formatCurrency(item.amount)}
+                            {(item.type === 'expense' || item.type === 'group_expense') ? '-' : '+'}{formatCurrency(item.amount)}
                           </button>
                         )}
                         <button
@@ -581,6 +704,163 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
               </AnimatePresence>
             </div>
           </>
+        ) : activeView === 'grupos' ? (
+          /* ── Vista Grupos ── */
+          <div className="space-y-4">
+            {expenseGroups.length === 0 ? (
+              <div className="text-center py-16 bg-white rounded-[2rem] border-2 border-dashed border-violet-200">
+                <Package className="w-12 h-12 text-violet-300 mx-auto mb-3" />
+                <p className="text-gray-500 text-sm font-bold">Sin grupos de gastos aún</p>
+                <p className="text-gray-400 text-xs mt-1">Crea uno desde el botón "Grupo" en el panel principal.</p>
+              </div>
+            ) : (
+              expenseGroups.map((group) => {
+                const groupTotal = (group.expense_group_items || []).reduce((s, i) => s + Number(i.amount), 0);
+                const isExpanded = expandedGroupId === group.id;
+                const isDeleting = deletingGroupId === group.id;
+                return (
+                  <motion.div
+                    key={group.id}
+                    layout
+                    className="bg-white rounded-[2rem] border border-violet-100 shadow-sm overflow-hidden"
+                  >
+                    <div
+                      className="flex items-center gap-4 p-5 cursor-pointer"
+                      onClick={() => setExpandedGroupId(isExpanded ? null : group.id)}
+                    >
+                      <div className="w-12 h-12 bg-violet-100 rounded-2xl flex items-center justify-center shrink-0">
+                        <Package className="w-5 h-5 text-violet-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="font-bold text-gray-800 block truncate">{group.name}</span>
+                        <span className="text-xs text-gray-400">
+                          {group.created_at ? new Date(group.created_at).toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                          {' · '}{(group.expense_group_items || []).length} ítem{(group.expense_group_items || []).length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <div className="flex flex-col items-end shrink-0 gap-1">
+                        <span className="text-lg font-black text-violet-600">{formatCurrency(groupTotal)}</span>
+                        <ChevronDown className={cn("w-4 h-4 text-gray-400 transition-transform", isExpanded && "rotate-180")} />
+                      </div>
+                    </div>
+
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="px-5 pb-5 space-y-2">
+                            {(group.expense_group_items || []).sort((a, b) => (a.date || a.created_at || '').localeCompare(b.date || b.created_at || '')).map((item) => (
+                              <div key={item.id} className="flex justify-between items-center bg-violet-50 rounded-2xl px-4 py-3">
+                                <div>
+                                  <span className="text-sm font-medium text-gray-700 block">{item.description}</span>
+                                  {item.date && (
+                                    <span className="text-[10px] text-gray-400 font-bold">
+                                      {new Date(item.date + 'T00:00:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-sm font-black text-violet-600 shrink-0 ml-3">{formatCurrency(Number(item.amount))}</span>
+                              </div>
+                            ))}
+                            <div className="flex justify-between items-center pt-2 px-1">
+                              <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Total</span>
+                              <span className="text-base font-black text-violet-600">{formatCurrency(groupTotal)}</span>
+                            </div>
+
+                            {/* Agregar gasto al grupo */}
+                            <AnimatePresence mode="wait">
+                              {addingItemToGroupId === group.id ? (
+                                <motion.div
+                                  key="form"
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  className="space-y-2 overflow-hidden"
+                                >
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    placeholder="Descripción (ej: Gasolina día 2)"
+                                    className="w-full bg-white rounded-xl px-3 py-2.5 text-sm font-bold text-gray-700 border-none outline-none focus:ring-2 focus:ring-violet-200"
+                                    value={newItemDesc}
+                                    onChange={(e) => setNewItemDesc(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Escape' && setAddingItemToGroupId(null)}
+                                  />
+                                  <div className="flex gap-2">
+                                    <input
+                                      type="number"
+                                      placeholder="$0"
+                                      className="flex-1 bg-white rounded-xl px-3 py-2.5 text-sm font-black text-violet-600 border-none outline-none focus:ring-2 focus:ring-violet-200 min-w-0"
+                                      value={newItemAmt}
+                                      onChange={(e) => setNewItemAmt(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleAddItemToGroup(group.id);
+                                        if (e.key === 'Escape') setAddingItemToGroupId(null);
+                                      }}
+                                    />
+                                    <input
+                                      type="date"
+                                      className="flex-1 bg-white rounded-xl px-2 py-2.5 text-sm text-gray-500 border-none outline-none focus:ring-2 focus:ring-violet-200 min-w-0"
+                                      value={newItemDate}
+                                      onChange={(e) => setNewItemDate(e.target.value)}
+                                    />
+                                  </div>
+                                  {saveItemError && addingItemToGroupId === group.id && (
+                                    <p className="text-xs text-red-500 font-medium px-1">{saveItemError}</p>
+                                  )}
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => handleAddItemToGroup(group.id)}
+                                      disabled={savingItem}
+                                      className="flex-1 bg-violet-600 text-white font-bold rounded-xl py-2.5 text-sm flex items-center justify-center gap-1.5 disabled:opacity-50"
+                                    >
+                                      <Save className="w-3.5 h-3.5" /> {savingItem ? 'Guardando…' : 'Guardar'}
+                                    </button>
+                                    <button
+                                      onClick={() => { setAddingItemToGroupId(null); setNewItemDesc(''); setNewItemAmt(''); setNewItemDate(localDateStr()); setSaveItemError(null); }}
+                                      className="p-2.5 bg-white text-gray-400 hover:text-gray-600 rounded-xl shrink-0"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </motion.div>
+                              ) : (
+                                <motion.button
+                                  key="btn"
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  onClick={() => { setAddingItemToGroupId(group.id); setNewItemDesc(''); setNewItemAmt(''); }}
+                                  className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-violet-200 text-violet-500 font-bold rounded-2xl hover:border-violet-400 hover:bg-violet-50 transition text-sm"
+                                >
+                                  <Plus className="w-4 h-4" /> Agregar gasto
+                                </motion.button>
+                              )}
+                            </AnimatePresence>
+
+                            <button
+                              onClick={() => handleDeleteGroup(group.id)}
+                              className={cn(
+                                "w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-bold text-sm transition mt-2",
+                                isDeleting ? "bg-red-500 text-white shadow-lg" : "text-red-400 hover:bg-red-50"
+                              )}
+                            >
+                              <Trash2 className={cn("w-4 h-4", isDeleting && "animate-pulse")} />
+                              {isDeleting ? '¿Confirmar eliminación?' : 'Eliminar grupo'}
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
+                );
+              })
+            )}
+          </div>
         ) : (
           /* ── Vista Análisis ── */
           <div className="space-y-4">
@@ -684,7 +964,7 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
                 {[
                   { label: 'Ingresos trabajo', value: items.filter(i => i.type === 'income').reduce((s, i) => s + i.amount, 0), color: 'text-green-600' },
                   { label: 'Ingresos extra', value: items.filter(i => i.type === 'extra').reduce((s, i) => s + i.amount, 0), color: 'text-orange-500' },
-                  { label: 'Gastos', value: items.filter(i => i.type === 'expense').reduce((s, i) => s + i.amount, 0), color: 'text-red-500' },
+                  { label: 'Gastos', value: items.filter(i => i.type === 'expense' || i.type === 'group_expense').reduce((s, i) => s + i.amount, 0), color: 'text-red-500' },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">{label}</span>
@@ -695,8 +975,8 @@ export default function History({ userId, onClose, onRefresh }: { userId: string
                   <span className="text-sm font-bold text-gray-700">Neto total</span>
                   <span className="text-base font-black text-indigo-600">
                     {formatCurrency(
-                      items.filter(i => i.type !== 'expense').reduce((s, i) => s + i.amount, 0) -
-                      items.filter(i => i.type === 'expense').reduce((s, i) => s + i.amount, 0)
+                      items.filter(i => i.type !== 'expense' && i.type !== 'group_expense').reduce((s, i) => s + i.amount, 0) -
+                      items.filter(i => i.type === 'expense' || i.type === 'group_expense').reduce((s, i) => s + i.amount, 0)
                     )}
                   </span>
                 </div>

@@ -23,6 +23,7 @@ export default function InstallmentForm({ user, onClose, onRefresh }: Installmen
   const [totalInstallments, setTotalInstallments] = useState(3);
   const [startMonth, setStartMonth] = useState(today.getMonth() + 1);
   const [startYear, setStartYear] = useState(today.getFullYear());
+  const [dueDay, setDueDay] = useState<number | ''>(today.getDate());
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
 
@@ -41,7 +42,7 @@ export default function InstallmentForm({ user, onClose, onRefresh }: Installmen
     if (!description.trim() || parsedTotal <= 0) return;
     setLoading(true);
 
-    const { error } = await supabase.from('credit_installments').insert({
+    const basePayload = {
       user_id: user.id,
       description: description.trim(),
       total_amount: parsedTotal,
@@ -49,7 +50,17 @@ export default function InstallmentForm({ user, onClose, onRefresh }: Installmen
       total_installments: totalInstallments,
       start_year: startYear,
       start_month: startMonth,
+    };
+
+    let { error } = await supabase.from('credit_installments').insert({
+      ...basePayload,
+      due_day: dueDay || null,
     });
+
+    // Si la columna due_day no existe aún (migración pendiente), reintentar sin ella
+    if (error && (error.message?.includes('due_day') || error.code === '42703' || error.code === 'PGRST204')) {
+      ({ error } = await supabase.from('credit_installments').insert(basePayload));
+    }
 
     if (error) {
       setFeedback({ type: 'error', text: error.message });
@@ -144,6 +155,20 @@ export default function InstallmentForm({ user, onClose, onRefresh }: Installmen
                 ))}
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 ml-4">Día de cobro mensual</label>
+            <select
+              className="w-full bg-gray-50 border-none rounded-2xl p-4 font-bold text-gray-700 focus:ring-4 focus:ring-purple-100"
+              value={dueDay}
+              onChange={e => setDueDay(e.target.value ? Number(e.target.value) : '')}
+            >
+              <option value="">Sin alerta de pago</option>
+              {Array.from({ length: 31 }, (_, i) => i + 1).map(d => (
+                <option key={d} value={d}>Día {d} de cada mes</option>
+              ))}
+            </select>
           </div>
 
           {parsedTotal > 0 && (

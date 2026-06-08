@@ -106,8 +106,13 @@ export default function InstallmentManager({ user, installments, onClose, onRefr
                                 Cuota {current}/{inst.total_installments} · hasta {getEndLabel(inst)}
                               </span>
                             </div>
-                            <div className="mt-1 text-[10px] text-gray-400">
-                              Total {formatCurrency(inst.total_amount)} · {formatCurrency(inst.installment_amount)}/mes
+                            <div className="mt-1 text-[10px] text-gray-400 flex items-center gap-2">
+                              <span>Total {formatCurrency(inst.total_amount)} · {formatCurrency(inst.installment_amount)}/mes</span>
+                              {inst.due_day && (
+                                <span className="bg-amber-100 text-amber-700 font-bold px-1.5 py-0.5 rounded-lg">
+                                  Cobro: día {inst.due_day}
+                                </span>
+                              )}
                             </div>
                           </div>
                           <button

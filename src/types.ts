@@ -63,6 +63,7 @@ export interface CreditInstallment {
   total_installments: number;
   start_year: number;
   start_month: number;
+  due_day?: number | null;
   created_at?: string;
 }
 
@@ -70,6 +71,24 @@ export interface ActiveInstallment extends CreditInstallment {
   current_installment: number;
   is_paid: boolean;
   amount_paid: number;
+}
+
+export interface ExpenseGroupItem {
+  id: string;
+  group_id: string;
+  user_id: string;
+  description: string;
+  amount: number;
+  date?: string;
+  created_at?: string;
+}
+
+export interface ExpenseGroup {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at?: string;
+  expense_group_items?: ExpenseGroupItem[];
 }
 
 export interface DashboardStats {
@@ -82,6 +101,7 @@ export interface DashboardStats {
   totalBudgeted: number;
   plannedSpent: number;
   unplannedSpent: number;
+  groupExpensesTotal: number;
   totalRemaining: number;
   accumulatedIncome: number;
   categoryBalances: CategoryBalance[];

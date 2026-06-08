@@ -3,7 +3,7 @@ import { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { X, Save } from 'lucide-react';
 import { motion } from 'motion/react';
-import { cn } from '../lib/utils';
+import { cn, localDateStr } from '../lib/utils';
 import FormFeedback, { FeedbackState } from './FormFeedback';
 import CurrencyInput from './CurrencyInput';
 
@@ -34,7 +34,7 @@ export default function ExpenseForm({
   const [category, setCategory] = useState(defaultCategory && categories.includes(defaultCategory) ? defaultCategory : (categories[0] || ''));
   const [isUnplanned, setIsUnplanned] = useState(resolvedIsUnplanned);
   const [customCategory, setCustomCategory] = useState(resolvedIsUnplanned && defaultCategory ? defaultCategory : '');
-  const [date, setDate] = useState(defaultDate || new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(defaultDate || localDateStr());
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
 

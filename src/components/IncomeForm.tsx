@@ -5,6 +5,7 @@ import { IncomeSource } from '../types';
 import { X, Save } from 'lucide-react';
 import { motion } from 'motion/react';
 import FormFeedback, { FeedbackState } from './FormFeedback';
+import { localDateStr } from '../lib/utils';
 import CurrencyInput from './CurrencyInput';
 
 interface IncomeFormProps {
@@ -18,7 +19,7 @@ export default function IncomeForm({ user, onClose, onRefresh, onSaved }: Income
   const [sources, setSources] = useState<IncomeSource[]>([]);
   const [sourceId, setSourceId] = useState('');
   const [gross, setGross] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(localDateStr());
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [showAddSource, setShowAddSource] = useState(false);

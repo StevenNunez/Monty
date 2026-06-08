@@ -5,11 +5,12 @@ import { DailyEntry, ExtraIncome, UserGoal, Budget, Expense, CreditInstallment }
 import { calculateStats } from '../lib/calculations';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion } from 'motion/react';
-import { TrendingUp, TrendingDown, Target, Zap, Plus, ShoppingCart, Bell } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Zap, Plus, ShoppingCart, Bell, Package } from 'lucide-react';
 import IncomeForm from './IncomeForm';
 import GoalManager from './GoalManager';
 import ExtraIncomeForm from './ExtraIncomeForm';
 import ExpenseForm from './ExpenseForm';
+import ExpenseGroupForm from './ExpenseGroupForm';
 import BudgetManager from './BudgetManager';
 import InstallmentManager from './InstallmentManager';
 import History from './History';
@@ -34,6 +35,7 @@ export default function Dashboard({
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [installments, setInstallments] = useState<CreditInstallment[]>([]);
+  const [groupItems, setGroupItems] = useState<{ amount: number; date?: string | null; created_at?: string | null }[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [dbError, setDbError] = useState<string | null>(null);
   const [showIncomeForm, setShowIncomeForm] = useState(false);
@@ -42,6 +44,7 @@ export default function Dashboard({
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [showBudgetManager, setShowBudgetManager] = useState(false);
   const [showInstallmentManager, setShowInstallmentManager] = useState(false);
+  const [showGroupForm, setShowGroupForm] = useState(false);
   const [installmentToPay, setInstallmentToPay] = useState<CreditInstallment | null>(null);
   const [showBencinaPrompt, setShowBencinaPrompt] = useState(false);
   const [showBencinaExpenseForm, setShowBencinaExpenseForm] = useState(false);
@@ -52,16 +55,27 @@ export default function Dashboard({
 
   const upcomingPayments = useMemo(() => {
     const currentDay = today.getDate();
-    return budgets
+
+    const fromBudgets = budgets
       .filter(b => b.due_day != null)
-      .map(b => ({ ...b, diff: (b.due_day as number) - currentDay }))
-      .filter(b => b.diff >= 0 && b.diff <= 5)
-      .sort((a, b) => a.diff - b.diff);
-  }, [budgets, today]);
+      .map(b => ({ id: b.id, label: b.category, amount: Number(b.amount), diff: (b.due_day as number) - currentDay, type: 'budget' as const }))
+      .filter(p => p.diff >= 0 && p.diff <= 5);
+
+    const fromInstallments = installments
+      .filter(inst => {
+        if (inst.due_day == null) return false;
+        const monthDiff = (today.getFullYear() - inst.start_year) * 12 + (today.getMonth() + 1 - inst.start_month);
+        return monthDiff < inst.total_installments;
+      })
+      .map(inst => ({ id: inst.id, label: inst.description, amount: Number(inst.installment_amount), diff: (inst.due_day as number) - currentDay, type: 'installment' as const }))
+      .filter(p => p.diff >= 0 && p.diff <= 5);
+
+    return [...fromBudgets, ...fromInstallments].sort((a, b) => a.diff - b.diff);
+  }, [budgets, installments, today]);
 
   const stats = useMemo(
-    () => calculateStats(goal, dailyEntries, extraIncomes, expenses, budgets),
-    [goal, dailyEntries, extraIncomes, expenses, budgets]
+    () => calculateStats(goal, dailyEntries, extraIncomes, expenses, budgets, groupItems),
+    [goal, dailyEntries, extraIncomes, expenses, budgets, groupItems]
   );
 
   useEffect(() => {
@@ -80,8 +94,8 @@ export default function Dashboard({
     localStorage.setItem('monty_notif_date', todayStr);
     upcomingPayments.forEach(p => {
       const msg = p.diff === 0 ? '¡Vence hoy!' : p.diff === 1 ? 'Vence mañana' : `Vence en ${p.diff} días`;
-      new Notification(`💳 ${p.category}`, {
-        body: `${msg} · ${formatCurrency(Number(p.amount))}`,
+      new Notification(`${p.type === 'installment' ? '💳' : '📅'} ${p.label}`, {
+        body: `${msg} · ${formatCurrency(p.amount)}`,
         icon: '/favicon.ico',
       });
     });
@@ -95,13 +109,14 @@ export default function Dashboard({
 
   const fetchData = async () => {
     try {
-      const [goalRes, entriesRes, extraRes, expensesRes, budgetsRes, installmentsRes] = await Promise.all([
+      const [goalRes, entriesRes, extraRes, expensesRes, budgetsRes, installmentsRes, groupItemsRes] = await Promise.all([
         supabase.from('goals').select('*').eq('user_id', user.id).maybeSingle(),
         supabase.from('daily_entries').select('*').eq('user_id', user.id),
         supabase.from('extra_income').select('*').eq('user_id', user.id),
         supabase.from('expenses').select('*').eq('user_id', user.id),
         supabase.from('budgets').select('*').eq('user_id', user.id),
         supabase.from('credit_installments').select('*').eq('user_id', user.id),
+        supabase.from('expense_group_items').select('amount, date, created_at').eq('user_id', user.id),
       ]);
 
       if (goalRes.error && goalRes.error.code !== 'PGRST116') throw goalRes.error;
@@ -117,6 +132,7 @@ export default function Dashboard({
       setExpenses(expensesRes.data || []);
       setBudgets(budgetsRes.data || []);
       setInstallments(installmentsRes.data || []);
+      setGroupItems(groupItemsRes.data || []);
       setDbError(null);
     } catch (err: any) {
       console.error('Database fetch error:', err);
@@ -135,6 +151,7 @@ export default function Dashboard({
       supabase.channel('expenses').on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `user_id=eq.${user.id}` }, () => fetchData()).subscribe(),
       supabase.channel('budgets').on('postgres_changes', { event: '*', schema: 'public', table: 'budgets', filter: `user_id=eq.${user.id}` }, () => fetchData()).subscribe(),
       supabase.channel('installments').on('postgres_changes', { event: '*', schema: 'public', table: 'credit_installments', filter: `user_id=eq.${user.id}` }, () => fetchData()).subscribe(),
+      supabase.channel('group_items').on('postgres_changes', { event: '*', schema: 'public', table: 'expense_group_items', filter: `user_id=eq.${user.id}` }, () => fetchData()).subscribe(),
     ];
     return () => channels.forEach(channel => supabase.removeChannel(channel));
   }, [user.id]);
@@ -147,6 +164,7 @@ export default function Dashboard({
           budgets={budgets}
           balances={stats.categoryBalances}
           unplannedSpent={stats.unplannedSpent}
+          groupExpensesTotal={stats.groupExpensesTotal}
           installments={installments}
           allExpenses={expenses}
           onManageBudgets={() => setShowBudgetManager(true)}
@@ -182,7 +200,7 @@ export default function Dashboard({
                 </p>
                 {upcomingPayments.map(p => (
                   <p key={p.id} className="text-xs text-amber-700 font-medium leading-relaxed">
-                    • <span className="capitalize font-bold">{p.category}</span>: {formatCurrency(Number(p.amount))} —{' '}
+                    • <span className="capitalize font-bold">{p.label}</span>{p.type === 'installment' ? ' 💳' : ''}: {formatCurrency(p.amount)} —{' '}
                     <span className={p.diff === 0 ? 'text-red-600 font-black' : ''}>
                       {p.diff === 0 ? '¡Hoy!' : p.diff === 1 ? 'mañana' : `en ${p.diff} días`}
                     </span>
@@ -307,7 +325,7 @@ export default function Dashboard({
             </div>
           </div>
           {(() => {
-            const gastosReales = stats.plannedSpent + stats.unplannedSpent;
+            const gastosReales = stats.plannedSpent + stats.unplannedSpent + stats.groupExpensesTotal;
             const netoReal = stats.accumulatedIncome - gastosReales;
             return (
               <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm border-l-4 border-l-green-500">
@@ -374,6 +392,12 @@ export default function Dashboard({
           >
             <Plus className="w-5 h-5 mr-2" /> Ganar
           </button>
+          <button
+            onClick={() => setShowGroupForm(true)}
+            className="flex items-center justify-center bg-violet-500/10 text-violet-400 px-4 rounded-2xl font-bold hover:bg-violet-500 hover:text-white transition-all active:scale-95 gap-1.5 text-sm"
+          >
+            <Package className="w-4 h-4" /> Grupo
+          </button>
         </div>
       </div>
 
@@ -396,7 +420,7 @@ export default function Dashboard({
           onCloseTab?.();
         }} onRefresh={fetchData} />
       )}
-      {showExtraForm && <ExtraIncomeForm user={user} onClose={() => setShowExtraForm(false)} />}
+      {showExtraForm && <ExtraIncomeForm user={user} onClose={() => setShowExtraForm(false)} onRefresh={fetchData} />}
       {showBudgetManager && (
         <BudgetManager
           user={user}
@@ -424,6 +448,8 @@ export default function Dashboard({
           onRefresh={() => { fetchData(); setInstallmentToPay(null); }}
         />
       )}
+
+      {showGroupForm && <ExpenseGroupForm user={user} onClose={() => setShowGroupForm(false)} onRefresh={fetchData} />}
 
       {activeTab === 'history' && <History userId={user.id} onClose={() => onCloseTab?.()} onRefresh={fetchData} />}
 

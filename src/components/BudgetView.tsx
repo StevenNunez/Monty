@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { UserGoal, Budget, CategoryBalance, CreditInstallment, ActiveInstallment, Expense } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion } from 'motion/react';
-import { Wallet, Target, ArrowRight, Plus, PieChart, ShoppingCart, CheckCircle, Clock, Calendar, CreditCard } from 'lucide-react';
+import { Wallet, Target, ArrowRight, Plus, PieChart, ShoppingCart, CheckCircle, Clock, Calendar, CreditCard, Package } from 'lucide-react';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -42,6 +42,7 @@ export default function BudgetView({
   budgets,
   balances,
   unplannedSpent,
+  groupExpensesTotal,
   installments,
   allExpenses,
   onManageBudgets,
@@ -53,6 +54,7 @@ export default function BudgetView({
   budgets: Budget[];
   balances: CategoryBalance[];
   unplannedSpent: number;
+  groupExpensesTotal: number;
   installments: CreditInstallment[];
   allExpenses: Expense[];
   onManageBudgets: () => void;
@@ -374,6 +376,33 @@ export default function BudgetView({
           </div>
         </div>
       </section>
+
+      {/* Groups Section */}
+      {groupExpensesTotal > 0 && (
+        <section>
+          <div className="flex justify-between items-end mb-4 px-2">
+            <h3 className="text-lg font-bold text-gray-800">Grupos de Gastos</h3>
+            <span className="text-xs font-bold text-violet-600 uppercase">Viajes / Proyectos</span>
+          </div>
+          <div className="bg-violet-50 border border-violet-100 p-5 rounded-3xl flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-violet-500 shadow-sm">
+                <Package className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="font-bold text-gray-800">Grupos activos</span>
+                <p className="text-[10px] text-gray-500">Gastos variables agrupados del mes</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-lg font-black text-violet-600">
+                {formatCurrency(groupExpensesTotal)}
+              </div>
+              <span className="text-[10px] text-gray-400 font-bold uppercase">Gastado</span>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Category List */}
       <section>

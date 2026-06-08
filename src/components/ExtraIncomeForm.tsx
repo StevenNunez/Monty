@@ -3,11 +3,11 @@ import { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { X, Gift } from 'lucide-react';
 import { motion } from 'motion/react';
-import { cn } from '../lib/utils';
+import { cn, localDateStr } from '../lib/utils';
 import FormFeedback, { FeedbackState } from './FormFeedback';
 import CurrencyInput from './CurrencyInput';
 
-export default function ExtraIncomeForm({ user, onClose }: { user: User; onClose: () => void }) {
+export default function ExtraIncomeForm({ user, onClose, onRefresh }: { user: User; onClose: () => void; onRefresh?: () => void }) {
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<'bonus' | 'tax_return' | 'sale' | 'other'>('bonus');
   const [affectsGoal, setAffectsGoal] = useState(true);
@@ -23,14 +23,14 @@ export default function ExtraIncomeForm({ user, onClose }: { user: User; onClose
       amount: Number(amount),
       type,
       affects_goal: affectsGoal,
-      date: new Date().toISOString().split('T')[0]
+      date: localDateStr()
     });
 
     if (error) {
       setFeedback({ type: 'error', text: error.message });
     } else {
       setFeedback({ type: 'success', text: '¡Ingreso extra guardado!' });
-      setTimeout(() => onClose(), 1200);
+      setTimeout(() => { onRefresh?.(); onClose(); }, 1200);
     }
     setLoading(false);
   };

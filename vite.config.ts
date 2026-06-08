@@ -42,7 +42,7 @@ export default defineConfig(({ mode }) => {
           globPatterns: ['**/*.{js,css,html,svg,woff2}'],
           runtimeCaching: [
             {
-              urlPattern: /^https:\/\/psmmafyprtrrwzybmekd\.supabase\.co\/.*/i,
+              urlPattern: /^https:\/\/etgmkkdnuezybnjsyaac\.supabase\.co\/.*/i,
               handler: 'NetworkFirst',
               options: {
                 cacheName: 'supabase-api',

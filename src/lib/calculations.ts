@@ -21,6 +21,7 @@ export function calculateStats(
   extraIncomes: ExtraIncome[],
   expenses: Expense[],
   budgets: Budget[],
+  groupItems: { amount: number; date?: string | null; created_at?: string | null }[] = [],
   today: Date = new Date()
 ): DashboardStats {
   const monthStart = startOfMonth(today);
@@ -119,14 +120,18 @@ export function calculateStats(
     };
   });
 
-  // Saldo Libre: Lo que llevo generado - (Total Presupuestado + Gastos No Planificados)
-  // Nota: No restamos la meta bruta aquí porque la meta es lo que queremos producir, no dinero que ya tenemos y debemos guardar necesariamente antes de gastar en comida, 
-  // pero el usuario dice "no gasta de mas de lo que se intenta recibir mensual".
-  // Si consideramos la meta como "dinero que ya no existe", entonces:
-  // Saldo Libre = (Neto Generado hoy) - Gastos No Planificados (ya que los planificados tienen su propio sobre)
-  // Pero para el dashboard, usaremos: Total Generado Mensual - Total Presupuestado - Gastos No Planificados
+  // Gastos de grupos del mes — usa date si existe, sino created_at como fallback
+  const monthGroupItems = groupItems.filter(item => {
+    const rawDate = item.date ?? (item.created_at ? item.created_at.split('T')[0] : null);
+    if (!rawDate) return true; // sin fecha: incluir siempre (no excluir gastos reales)
+    const d = new Date(rawDate + 'T00:00:00');
+    return d >= monthStart && d <= monthEnd;
+  });
+  const groupExpensesTotal = monthGroupItems.reduce((sum, item) => sum + Number(item.amount), 0);
+
+  // Saldo Libre = Total Generado - Presupuestado - Improvistos - Grupos
   const totalGenerated = accumulatedNetMonth + extraIncomeAppliedMonth;
-  const totalRemaining = totalGenerated - totalBudgeted - unplannedSpent;
+  const totalRemaining = totalGenerated - totalBudgeted - unplannedSpent - groupExpensesTotal;
 
   return {
     netToday,
@@ -138,6 +143,7 @@ export function calculateStats(
     totalBudgeted,
     plannedSpent,
     unplannedSpent,
+    groupExpensesTotal,
     totalRemaining,
     accumulatedIncome: totalGenerated,
     categoryBalances
