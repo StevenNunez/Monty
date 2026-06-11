@@ -65,6 +65,14 @@ export function calculateStats(
     })
     .reduce((sum, ei) => sum + Number(ei.amount), 0);
 
+  // Todo el dinero extra que entró este mes (para cálculo de caja real, independiente de la meta)
+  const allExtraIncomeMonth = extraIncomes
+    .filter(ei => {
+      const d = new Date(ei.date + 'T00:00:00');
+      return d >= monthStart && d <= monthEnd;
+    })
+    .reduce((sum, ei) => sum + Number(ei.amount), 0);
+
   const monthlyTarget = goal?.monthly_target || 0;
   
   const dailyTarget = calculateDynamicDailyTarget(
@@ -129,9 +137,11 @@ export function calculateStats(
   });
   const groupExpensesTotal = monthGroupItems.reduce((sum, item) => sum + Number(item.amount), 0);
 
-  // Saldo Libre = Total Generado - Presupuestado - Improvistos - Grupos
+  // Para la meta: solo ingresos relevantes al objetivo (affects_goal)
   const totalGenerated = accumulatedNetMonth + extraIncomeAppliedMonth;
-  const totalRemaining = totalGenerated - totalBudgeted - unplannedSpent - groupExpensesTotal;
+  // Para el saldo real de caja: incluye TODO el dinero que entró (préstamos, cobros, etc.)
+  const totalCashIn = accumulatedNetMonth + allExtraIncomeMonth;
+  const totalRemaining = totalCashIn - totalBudgeted - unplannedSpent - groupExpensesTotal;
 
   return {
     netToday,
@@ -146,6 +156,7 @@ export function calculateStats(
     groupExpensesTotal,
     totalRemaining,
     accumulatedIncome: totalGenerated,
+    totalCashIn,
     categoryBalances
   };
 }

@@ -159,3 +159,40 @@ DO $$ BEGIN
   CREATE POLICY "Users can manage their own expense group items" ON expense_group_items
       FOR ALL USING (auth.uid() = user_id);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- 10. Préstamos (dado = presté yo, recibido = me prestaron)
+CREATE TABLE IF NOT EXISTS loans (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('dado', 'recibido')),
+    person TEXT NOT NULL,
+    amount DECIMAL(12,2) NOT NULL,
+    paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pendiente' CHECK (status IN ('pendiente', 'parcial', 'saldado')),
+    date DATE DEFAULT CURRENT_DATE NOT NULL,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE loans ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  CREATE POLICY "Users can manage their own loans" ON loans
+      FOR ALL USING (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- 11. Pagos/abonos de préstamos
+CREATE TABLE IF NOT EXISTS loan_payments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    loan_id UUID REFERENCES loans(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    amount DECIMAL(12,2) NOT NULL,
+    date DATE DEFAULT CURRENT_DATE NOT NULL,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE loan_payments ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  CREATE POLICY "Users can manage their own loan payments" ON loan_payments
+      FOR ALL USING (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

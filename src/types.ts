@@ -91,6 +91,29 @@ export interface ExpenseGroup {
   expense_group_items?: ExpenseGroupItem[];
 }
 
+export interface Loan {
+  id: string;
+  user_id: string;
+  type: 'dado' | 'recibido';
+  person: string;
+  amount: number;
+  paid_amount: number;
+  status: 'pendiente' | 'parcial' | 'saldado';
+  date: string;
+  notes?: string;
+  created_at?: string;
+}
+
+export interface LoanPayment {
+  id: string;
+  loan_id: string;
+  user_id: string;
+  amount: number;
+  date: string;
+  notes?: string;
+  created_at?: string;
+}
+
 export interface DashboardStats {
   netToday: number;
   dailyTarget: number;
@@ -103,6 +126,7 @@ export interface DashboardStats {
   unplannedSpent: number;
   groupExpensesTotal: number;
   totalRemaining: number;
-  accumulatedIncome: number;
+  accumulatedIncome: number; // Solo ingresos que cuentan para la meta
+  totalCashIn: number;       // Todo el dinero real que entró (incluye préstamos)
   categoryBalances: CategoryBalance[];
 }

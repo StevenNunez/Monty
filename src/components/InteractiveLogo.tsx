@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { Fragment, useRef, useState } from 'react';
 import { cn } from '../lib/utils';
 
 interface InteractiveLogoProps {
@@ -15,12 +15,9 @@ export default function InteractiveLogo({
   return (
     <span className={cn("flex select-none", className)}>
       {text.split('').map((char, index) => (
-        <AnimatedLetter
-          key={index}
-          char={char}
-          index={index}
-          variant={variant}
-        />
+        <Fragment key={index}>
+          <AnimatedLetter char={char} index={index} variant={variant} />
+        </Fragment>
       ))}
     </span>
   );

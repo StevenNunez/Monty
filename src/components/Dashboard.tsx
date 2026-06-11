@@ -1,18 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { DailyEntry, ExtraIncome, UserGoal, Budget, Expense, CreditInstallment } from '../types';
+import { DailyEntry, ExtraIncome, UserGoal, Budget, Expense, CreditInstallment, Loan } from '../types';
 import { calculateStats } from '../lib/calculations';
 import { formatCurrency, cn } from '../lib/utils';
-import { motion } from 'motion/react';
-import { TrendingUp, TrendingDown, Target, Zap, Plus, ShoppingCart, Bell, Package } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { TrendingUp, TrendingDown, Target, Zap, Plus, ShoppingCart, Bell, Package, Handshake, X } from 'lucide-react';
 import IncomeForm from './IncomeForm';
 import GoalManager from './GoalManager';
 import ExtraIncomeForm from './ExtraIncomeForm';
 import ExpenseForm from './ExpenseForm';
-import ExpenseGroupForm from './ExpenseGroupForm';
+import ExpenseGroupManager from './ExpenseGroupManager';
 import BudgetManager from './BudgetManager';
 import InstallmentManager from './InstallmentManager';
+import LoanForm from './LoanForm';
+import LoanManager from './LoanManager';
 import History from './History';
 import BudgetView from './BudgetView';
 import DashboardSkeleton from './DashboardSkeleton';
@@ -35,6 +37,7 @@ export default function Dashboard({
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [installments, setInstallments] = useState<CreditInstallment[]>([]);
+  const [loans, setLoans] = useState<Loan[]>([]);
   const [groupItems, setGroupItems] = useState<{ amount: number; date?: string | null; created_at?: string | null }[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [dbError, setDbError] = useState<string | null>(null);
@@ -45,6 +48,9 @@ export default function Dashboard({
   const [showBudgetManager, setShowBudgetManager] = useState(false);
   const [showInstallmentManager, setShowInstallmentManager] = useState(false);
   const [showGroupForm, setShowGroupForm] = useState(false);
+  const [showLoanForm, setShowLoanForm] = useState(false);
+  const [showLoanManager, setShowLoanManager] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [installmentToPay, setInstallmentToPay] = useState<CreditInstallment | null>(null);
   const [showBencinaPrompt, setShowBencinaPrompt] = useState(false);
   const [showBencinaExpenseForm, setShowBencinaExpenseForm] = useState(false);
@@ -109,7 +115,7 @@ export default function Dashboard({
 
   const fetchData = async () => {
     try {
-      const [goalRes, entriesRes, extraRes, expensesRes, budgetsRes, installmentsRes, groupItemsRes] = await Promise.all([
+      const [goalRes, entriesRes, extraRes, expensesRes, budgetsRes, installmentsRes, groupItemsRes, loansRes] = await Promise.all([
         supabase.from('goals').select('*').eq('user_id', user.id).maybeSingle(),
         supabase.from('daily_entries').select('*').eq('user_id', user.id),
         supabase.from('extra_income').select('*').eq('user_id', user.id),
@@ -117,6 +123,7 @@ export default function Dashboard({
         supabase.from('budgets').select('*').eq('user_id', user.id),
         supabase.from('credit_installments').select('*').eq('user_id', user.id),
         supabase.from('expense_group_items').select('amount, date, created_at').eq('user_id', user.id),
+        supabase.from('loans').select('*').eq('user_id', user.id),
       ]);
 
       if (goalRes.error && goalRes.error.code !== 'PGRST116') throw goalRes.error;
@@ -133,6 +140,7 @@ export default function Dashboard({
       setBudgets(budgetsRes.data || []);
       setInstallments(installmentsRes.data || []);
       setGroupItems(groupItemsRes.data || []);
+      setLoans(loansRes.data || []);
       setDbError(null);
     } catch (err: any) {
       console.error('Database fetch error:', err);
@@ -152,6 +160,7 @@ export default function Dashboard({
       supabase.channel('budgets').on('postgres_changes', { event: '*', schema: 'public', table: 'budgets', filter: `user_id=eq.${user.id}` }, () => fetchData()).subscribe(),
       supabase.channel('installments').on('postgres_changes', { event: '*', schema: 'public', table: 'credit_installments', filter: `user_id=eq.${user.id}` }, () => fetchData()).subscribe(),
       supabase.channel('group_items').on('postgres_changes', { event: '*', schema: 'public', table: 'expense_group_items', filter: `user_id=eq.${user.id}` }, () => fetchData()).subscribe(),
+      supabase.channel('loans').on('postgres_changes', { event: '*', schema: 'public', table: 'loans', filter: `user_id=eq.${user.id}` }, () => fetchData()).subscribe(),
     ];
     return () => channels.forEach(channel => supabase.removeChannel(channel));
   }, [user.id]);
@@ -326,7 +335,7 @@ export default function Dashboard({
           </div>
           {(() => {
             const gastosReales = stats.plannedSpent + stats.unplannedSpent + stats.groupExpensesTotal;
-            const netoReal = stats.accumulatedIncome - gastosReales;
+            const netoReal = stats.totalCashIn - gastosReales;
             return (
               <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm border-l-4 border-l-green-500">
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">En Bolsillo este Mes</span>
@@ -334,12 +343,89 @@ export default function Dashboard({
                   {formatCurrency(netoReal)}
                 </div>
                 <span className="text-[8px] text-gray-400 font-bold uppercase tracking-tighter">
-                  Bruto {formatCurrency(stats.accumulatedIncome)} · Gastos -{formatCurrency(gastosReales)}
+                  Bruto {formatCurrency(stats.totalCashIn)} · Gastos -{formatCurrency(gastosReales)}
                 </span>
               </div>
             );
           })()}
         </div>
+
+        {/* Tarjeta Préstamos */}
+        {(() => {
+          const activosPrestamos = loans.filter(l => l.status !== 'saldado');
+          const meDeben = activosPrestamos.filter(l => l.type === 'dado').reduce((s, l) => s + (l.amount - l.paid_amount), 0);
+          const debo = activosPrestamos.filter(l => l.type === 'recibido').reduce((s, l) => s + (l.amount - l.paid_amount), 0);
+
+          if (activosPrestamos.length === 0) {
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="w-full mb-6 bg-white rounded-[2rem] border border-dashed border-gray-200 p-5"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-gray-300 uppercase tracking-widest flex items-center gap-1.5">
+                    <Handshake className="w-4 h-4" /> Préstamos
+                  </span>
+                  <button
+                    onClick={() => setShowLoanForm(true)}
+                    className="text-[11px] font-bold text-sky-500 hover:text-sky-600 flex items-center gap-1 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Registrar
+                  </button>
+                </div>
+              </motion.div>
+            );
+          }
+
+          return (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="w-full mb-6 bg-white rounded-[2rem] border border-gray-100 shadow-sm p-5"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                  <Handshake className="w-4 h-4" /> Préstamos activos
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowLoanForm(true)}
+                    className="text-[11px] font-bold text-sky-400 hover:text-sky-600 flex items-center gap-1 transition p-1"
+                    aria-label="Nuevo préstamo"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setShowLoanManager(true)}
+                    className="text-[10px] font-bold text-sky-500 hover:text-sky-700 transition"
+                  >
+                    {activosPrestamos.length} activo{activosPrestamos.length !== 1 ? 's' : ''} →
+                  </button>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowLoanManager(true)}
+                className="w-full text-left"
+              >
+                <div className="grid grid-cols-2 gap-3">
+                  {meDeben > 0 && (
+                    <div className="bg-sky-50 rounded-xl p-3 border border-sky-100">
+                      <p className="text-[10px] font-bold text-sky-500 uppercase tracking-wider">Te deben</p>
+                      <p className="text-lg font-black text-sky-700">{formatCurrency(meDeben)}</p>
+                    </div>
+                  )}
+                  {debo > 0 && (
+                    <div className="bg-amber-50 rounded-xl p-3 border border-amber-100">
+                      <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">Debes</p>
+                      <p className="text-lg font-black text-amber-700">{formatCurrency(debo)}</p>
+                    </div>
+                  )}
+                </div>
+              </button>
+            </motion.div>
+          );
+        })()}
 
         {/* Progreso Meta Mensual */}
         <div className="space-y-4">
@@ -379,24 +465,83 @@ export default function Dashboard({
 
       {/* Quick Action Floating Panel */}
       <div className="fixed bottom-20 left-1/2 -translate-x-1/2 w-full max-w-sm px-4 z-40">
+        {/* Menú secundario expandible */}
+        <AnimatePresence>
+          {showMoreMenu && (
+            <>
+              {/* Backdrop para cerrar */}
+              <div
+                className="fixed inset-0 z-[-1]"
+                onClick={() => setShowMoreMenu(false)}
+              />
+              <motion.div
+                initial={{ opacity: 0, y: 12, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.95 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                className="mb-2 bg-gray-800 border border-white/10 rounded-2xl overflow-hidden shadow-2xl"
+              >
+                <button
+                  onClick={() => { setShowGroupForm(true); setShowMoreMenu(false); }}
+                  className="w-full flex items-center gap-3 px-5 py-4 text-violet-300 hover:bg-violet-500/20 transition-colors active:scale-95 border-b border-white/5"
+                >
+                  <div className="p-2 rounded-xl bg-violet-500/20">
+                    <Package className="w-4 h-4" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold text-white">Gasto en grupo</p>
+                    <p className="text-[11px] text-gray-400">Divide con otras personas</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setShowLoanForm(true); setShowMoreMenu(false); }}
+                  className="w-full flex items-center gap-3 px-5 py-4 text-sky-300 hover:bg-sky-500/20 transition-colors active:scale-95"
+                >
+                  <div className="p-2 rounded-xl bg-sky-500/20">
+                    <Handshake className="w-4 h-4" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold text-white">Préstamo</p>
+                    <p className="text-[11px] text-gray-400">Presté o me prestaron</p>
+                  </div>
+                </button>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+
+        {/* Barra principal */}
         <div className="bg-gray-900 shadow-2xl rounded-3xl p-2 flex gap-2 border border-white/10 backdrop-blur-xl">
           <button
             onClick={() => setShowExpenseForm(true)}
-            className="flex-1 flex items-center justify-center bg-red-500/10 text-red-400 p-4 rounded-2xl font-bold hover:bg-red-500 hover:text-white transition-all active:scale-95"
+            className="flex-1 flex items-center justify-center bg-red-500/10 text-red-400 p-4 rounded-2xl font-bold hover:bg-red-500 hover:text-white transition-all active:scale-95 gap-2"
           >
-            <ShoppingCart className="w-5 h-5 mr-2" /> Gastar
+            <ShoppingCart className="w-5 h-5" />
+            <span>Gastar</span>
           </button>
           <button
             onClick={() => setShowIncomeForm(true)}
-            className="flex-1 flex items-center justify-center bg-green-500 text-white p-4 rounded-2xl font-bold shadow-lg hover:bg-green-600 transition-all active:scale-95"
+            className="flex-1 flex items-center justify-center bg-green-500 text-white p-4 rounded-2xl font-bold shadow-lg hover:bg-green-600 transition-all active:scale-95 gap-2"
           >
-            <Plus className="w-5 h-5 mr-2" /> Ganar
+            <Plus className="w-5 h-5" />
+            <span>Ganar</span>
           </button>
           <button
-            onClick={() => setShowGroupForm(true)}
-            className="flex items-center justify-center bg-violet-500/10 text-violet-400 px-4 rounded-2xl font-bold hover:bg-violet-500 hover:text-white transition-all active:scale-95 gap-1.5 text-sm"
+            onClick={() => setShowMoreMenu(v => !v)}
+            className={cn(
+              "flex items-center justify-center w-14 rounded-2xl font-bold transition-all active:scale-95",
+              showMoreMenu
+                ? "bg-white/20 text-white"
+                : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white"
+            )}
+            aria-label="Más acciones"
           >
-            <Package className="w-4 h-4" /> Grupo
+            <motion.div
+              animate={{ rotate: showMoreMenu ? 45 : 0 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+            >
+              {showMoreMenu ? <X className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
+            </motion.div>
           </button>
         </div>
       </div>
@@ -449,7 +594,9 @@ export default function Dashboard({
         />
       )}
 
-      {showGroupForm && <ExpenseGroupForm user={user} onClose={() => setShowGroupForm(false)} onRefresh={fetchData} />}
+      {showGroupForm && <ExpenseGroupManager user={user} onClose={() => setShowGroupForm(false)} onRefresh={fetchData} />}
+      {showLoanForm && <LoanForm user={user} onClose={() => setShowLoanForm(false)} onRefresh={fetchData} />}
+      {showLoanManager && <LoanManager user={user} loans={loans} onClose={() => setShowLoanManager(false)} onRefresh={fetchData} />}
 
       {activeTab === 'history' && <History userId={user.id} onClose={() => onCloseTab?.()} onRefresh={fetchData} />}
 

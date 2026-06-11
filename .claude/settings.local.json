@@ -10,7 +10,11 @@
       "Bash(awk '{print $NF}')",
       "Bash(npm run *)",
       "Bash(git *)",
-      "Bash(dir C:TeoLabsMontysrccomponents *)"
+      "Bash(dir C:TeoLabsMontysrccomponents *)",
+      "Bash(npm update *)",
+      "Bash(Get-ChildItem -Recurse -Force)",
+      "Bash(Select-Object -First 100)",
+      "Bash(Format-Table FullName)"
     ]
   }
 }
