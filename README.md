@@ -130,7 +130,7 @@ npm run test   # corre la suite de Vitest (lógica de cálculos)
 ```
 
 ---
-
+ok
 ## Deploy
 
 Conecta el repositorio a Vercel y configura las variables de entorno. El build es estático (`npm run build` genera `dist/`).
