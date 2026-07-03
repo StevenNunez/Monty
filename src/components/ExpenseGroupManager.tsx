@@ -1,10 +1,10 @@
 import React, { Fragment, useEffect, useState } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { X, Plus, Package, ChevronDown, ChevronUp, Save, Trash2 } from 'lucide-react';
+import { X, Plus, Package, ChevronDown, ChevronUp, Save, Trash2, Pencil } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, localDateStr, cn } from '../lib/utils';
-import { ExpenseGroup } from '../types';
+import { ExpenseGroup, ExpenseGroupItem } from '../types';
 import CurrencyInput from './CurrencyInput';
 import FormFeedback, { FeedbackState } from './FormFeedback';
 
@@ -108,6 +108,123 @@ function AddItemForm({
   );
 }
 
+// ─── Formulario inline para editar un ítem existente ──────────────────────────
+function EditItemForm({
+  item,
+  onSaved,
+  onCancel,
+}: {
+  item: ExpenseGroupItem;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [desc, setDesc] = useState(item.description);
+  const [amount, setAmount] = useState(String(Math.round(Number(item.amount))));
+  const [date, setDate] = useState(item.date || (item.created_at ? item.created_at.split('T')[0] : localDateStr()));
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    if (!desc.trim() || Number(amount) <= 0) return;
+    setSaving(true);
+    setError(null);
+
+    const { error: err } = await supabase
+      .from('expense_group_items')
+      .update({ description: desc.trim(), amount: Number(amount), date })
+      .eq('id', item.id);
+
+    if (err) {
+      setError(err.message);
+      setSaving(false);
+      return;
+    }
+
+    onSaved();
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
+      return;
+    }
+    setSaving(true);
+    const { error: err } = await supabase.from('expense_group_items').delete().eq('id', item.id);
+    if (err) {
+      setError(err.message);
+      setSaving(false);
+      return;
+    }
+    onSaved();
+  };
+
+  return (
+    <div className="bg-violet-50 rounded-2xl p-4 space-y-3 border border-violet-200">
+      <input
+        type="text"
+        autoFocus
+        placeholder="Descripción"
+        className="w-full bg-white border-none rounded-xl px-4 py-3 text-sm font-bold text-gray-700 focus:ring-2 focus:ring-violet-200 outline-none transition"
+        value={desc}
+        onChange={e => setDesc(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') handleSave();
+          if (e.key === 'Escape') onCancel();
+        }}
+      />
+      <div className="flex gap-2">
+        <CurrencyInput
+          value={amount}
+          onChange={setAmount}
+          placeholder="$0"
+          className="flex-1 bg-white border-none rounded-xl px-4 py-3 text-sm font-black text-violet-600 text-center focus:ring-2 focus:ring-violet-200 outline-none transition min-w-0"
+        />
+        <input
+          type="date"
+          className="flex-1 bg-white border-none rounded-xl px-3 py-3 text-sm text-gray-500 focus:ring-2 focus:ring-violet-200 outline-none transition min-w-0"
+          value={date}
+          onChange={e => setDate(e.target.value)}
+        />
+      </div>
+      {error && <p className="text-xs text-red-500 font-bold">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          onClick={handleSave}
+          disabled={saving || !desc.trim() || Number(amount) <= 0}
+          className="flex-1 bg-violet-600 text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-1.5 disabled:opacity-50 active:scale-95 transition"
+        >
+          <Save className="w-4 h-4" />
+          {saving ? 'Guardando...' : 'Guardar'}
+        </button>
+        <button
+          onClick={handleDelete}
+          disabled={saving}
+          className={cn(
+            'px-4 py-3 rounded-xl text-sm font-bold transition active:scale-95',
+            confirmDelete ? 'bg-red-500 text-white' : 'bg-white text-red-400 border border-red-100'
+          )}
+          aria-label={confirmDelete ? 'Confirmar eliminación' : 'Eliminar ítem'}
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+        <button
+          onClick={onCancel}
+          className="px-4 bg-white text-gray-400 font-bold py-3 rounded-xl text-sm border border-gray-100 active:scale-95 transition"
+        >
+          Cancelar
+        </button>
+      </div>
+      {confirmDelete && (
+        <p className="text-[11px] text-red-500 font-bold text-center">
+          Toca el ícono de nuevo para confirmar borrado
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── Tarjeta de un grupo existente ────────────────────────────────────────────
 function GroupCard({
   group,
@@ -121,6 +238,10 @@ function GroupCard({
   const [expanded, setExpanded] = useState(false);
   const [addingItem, setAddingItem] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [nameValue, setNameValue] = useState(group.name);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   const items = group.expense_group_items || [];
   const total = items.reduce((s, i) => s + Number(i.amount), 0);
@@ -131,11 +252,21 @@ function GroupCard({
     onRefresh();
   };
 
+  const handleRename = async () => {
+    const trimmed = nameValue.trim();
+    if (!trimmed) return;
+    const { error } = await supabase.from('expense_groups').update({ name: trimmed }).eq('id', group.id);
+    if (error) { setRenameError(error.message); return; }
+    setRenameError(null);
+    setRenaming(false);
+    onRefresh();
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
       {/* Cabecera del grupo */}
       <button
-        onClick={() => { setExpanded(v => !v); setAddingItem(false); }}
+        onClick={() => { setExpanded(v => !v); setAddingItem(false); setEditingItemId(null); setRenaming(false); setConfirmDelete(false); }}
         className="w-full flex items-center justify-between p-4 text-left"
       >
         <div className="flex items-center gap-3">
@@ -176,15 +307,34 @@ function GroupCard({
               {items.length > 0 ? (
                 <div className="space-y-1.5 mb-3">
                   {items.map(item => (
-                    <div key={item.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-xl">
-                      <div>
-                        <p className="text-sm font-bold text-gray-700">{item.description}</p>
-                        {item.date && (
-                          <p className="text-[10px] text-gray-400">{item.date}</p>
-                        )}
+                    editingItemId === item.id ? (
+                      <Fragment key={item.id}>
+                        <EditItemForm
+                          item={item}
+                          onSaved={() => { setEditingItemId(null); onRefresh(); }}
+                          onCancel={() => setEditingItemId(null)}
+                        />
+                      </Fragment>
+                    ) : (
+                      <div key={item.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-xl">
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-gray-700 truncate">{item.description}</p>
+                          {item.date && (
+                            <p className="text-[10px] text-gray-400">{item.date}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
+                          <span className="text-sm font-black text-violet-600">{formatCurrency(Number(item.amount))}</span>
+                          <button
+                            onClick={() => { setEditingItemId(item.id); setAddingItem(false); setRenaming(false); }}
+                            className="p-2 text-gray-300 hover:text-violet-600 active:scale-95 transition"
+                            aria-label={`Editar ${item.description}`}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      <span className="text-sm font-black text-violet-600">{formatCurrency(Number(item.amount))}</span>
-                    </div>
+                    )
                   ))}
                 </div>
               ) : (
@@ -203,14 +353,57 @@ function GroupCard({
                 )}
               </AnimatePresence>
 
+              {/* Renombrar grupo */}
+              {renaming && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="Nombre del grupo"
+                      className="flex-1 min-w-0 bg-violet-50 border border-violet-200 rounded-xl px-4 py-2.5 text-sm font-bold text-gray-700 focus:ring-2 focus:ring-violet-200 outline-none transition"
+                      value={nameValue}
+                      onChange={e => setNameValue(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') handleRename();
+                        if (e.key === 'Escape') { setRenaming(false); setNameValue(group.name); }
+                      }}
+                    />
+                    <button
+                      onClick={handleRename}
+                      disabled={!nameValue.trim()}
+                      className="px-3 py-2.5 bg-violet-600 text-white rounded-xl active:scale-95 transition disabled:opacity-50"
+                      aria-label="Guardar nombre"
+                    >
+                      <Save className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => { setRenaming(false); setNameValue(group.name); setRenameError(null); }}
+                      className="px-3 py-2.5 bg-gray-100 text-gray-400 rounded-xl active:scale-95 transition"
+                      aria-label="Cancelar"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {renameError && <p className="text-xs text-red-500 font-bold">{renameError}</p>}
+                </div>
+              )}
+
               {/* Botones de acción */}
-              {!addingItem && (
+              {!addingItem && !renaming && (
                 <div className="flex gap-2 pt-1">
                   <button
-                    onClick={() => setAddingItem(true)}
+                    onClick={() => { setAddingItem(true); setEditingItemId(null); }}
                     className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-violet-50 text-violet-600 font-bold rounded-xl text-sm hover:bg-violet-100 active:scale-95 transition border border-violet-100"
                   >
                     <Plus className="w-4 h-4" /> Agregar gasto
+                  </button>
+                  <button
+                    onClick={() => { setRenaming(true); setNameValue(group.name); setEditingItemId(null); setConfirmDelete(false); }}
+                    className="px-3 py-2.5 rounded-xl text-sm font-bold bg-gray-100 text-gray-400 hover:bg-gray-200 transition active:scale-95"
+                    aria-label="Renombrar grupo"
+                  >
+                    <Pencil className="w-4 h-4" />
                   </button>
                   <button
                     onClick={handleDelete}
@@ -220,12 +413,13 @@ function GroupCard({
                         ? 'bg-red-500 text-white'
                         : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
                     )}
+                    aria-label="Eliminar grupo"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               )}
-              {confirmDelete && !addingItem && (
+              {confirmDelete && !addingItem && !renaming && (
                 <p className="text-[11px] text-red-500 font-bold text-center">
                   Toca el ícono de nuevo para confirmar borrado
                 </p>

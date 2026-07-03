@@ -9,7 +9,7 @@ import CurrencyInput from './CurrencyInput';
 
 export default function ExtraIncomeForm({ user, onClose, onRefresh }: { user: User; onClose: () => void; onRefresh?: () => void }) {
   const [amount, setAmount] = useState('');
-  const [type, setType] = useState<'bonus' | 'tax_return' | 'sale' | 'other'>('bonus');
+  const [type, setType] = useState<'bonus' | 'tax_return' | 'sale' | 'salary' | 'other'>('bonus');
   const [affectsGoal, setAffectsGoal] = useState(true);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
@@ -72,9 +72,15 @@ export default function ExtraIncomeForm({ user, onClose, onRefresh }: { user: Us
             <select
               className="w-full bg-gray-50 border-none rounded-2xl p-4"
               value={type}
-              onChange={(e) => setType(e.target.value as 'bonus' | 'tax_return' | 'sale' | 'other')}
+              onChange={(e) => {
+                const newType = e.target.value as 'bonus' | 'tax_return' | 'sale' | 'salary' | 'other';
+                setType(newType);
+                // El sueldo suma a la caja pero no infla la meta de ingresos por apps
+                if (newType === 'salary') setAffectsGoal(false);
+              }}
             >
               <option value="bonus">Bono / Gratificación</option>
+              <option value="salary">Sueldo</option>
               <option value="tax_return">Devolución Impuestos</option>
               <option value="sale">Venta de artículo</option>
               <option value="other">Otro</option>

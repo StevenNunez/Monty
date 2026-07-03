@@ -1,8 +1,13 @@
+export type IncomeMode = 'driver' | 'salary' | 'mixed';
+
 export interface UserGoal {
   user_id: string;
-  monthly_target: number;
+  monthly_target: number; // modo driver: meta bruta de ingreso · modos salary/mixed: meta de ahorro
   yearly_target: number;
   working_days?: number[]; // [0, 1, 2, 3, 4, 5, 6] representing days of the week
+  income_mode?: IncomeMode;
+  salary_amount?: number;
+  salary_pay_day?: number | null;
 }
 
 export interface IncomeSource {
@@ -34,7 +39,7 @@ export interface ExtraIncome {
   user_id: string;
   amount: number;
   date: string;
-  type: 'bonus' | 'tax_return' | 'sale' | 'other';
+  type: 'bonus' | 'tax_return' | 'sale' | 'salary' | 'other';
   affects_goal: boolean;
   description?: string;
 }
@@ -129,4 +134,12 @@ export interface DashboardStats {
   accumulatedIncome: number; // Solo ingresos que cuentan para la meta
   totalCashIn: number;       // Todo el dinero real que entró (incluye préstamos)
   categoryBalances: CategoryBalance[];
+  // ─── Modos salary / mixed ───
+  incomeMode: IncomeMode;
+  salaryReceived: boolean;     // si el sueldo del mes ya fue registrado
+  spentToday: number;          // gastado hoy fuera de presupuesto (imprevistos + grupos)
+  spendAvailableToday: number; // límite de gasto libre de hoy sin comprometer la meta de ahorro
+  spendableRemaining: number;  // libre para gastar el resto del mes (ya descontado lo gastado)
+  projectedSavings: number;    // ahorro proyectado del mes (asume el sueldo aunque no haya llegado)
+  driveIncomeMonth: number;    // ingresos por conducción (apps) del mes
 }

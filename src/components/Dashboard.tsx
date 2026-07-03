@@ -3,9 +3,9 @@ import { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { DailyEntry, ExtraIncome, UserGoal, Budget, Expense, CreditInstallment, Loan } from '../types';
 import { calculateStats } from '../lib/calculations';
-import { formatCurrency, cn } from '../lib/utils';
+import { formatCurrency, cn, localDateStr } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { TrendingUp, TrendingDown, Target, Zap, Plus, ShoppingCart, Bell, Package, Handshake, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Zap, Plus, ShoppingCart, Bell, Package, Handshake, X, Car } from 'lucide-react';
 import IncomeForm from './IncomeForm';
 import GoalManager from './GoalManager';
 import ExtraIncomeForm from './ExtraIncomeForm';
@@ -55,6 +55,8 @@ export default function Dashboard({
   const [showBencinaPrompt, setShowBencinaPrompt] = useState(false);
   const [showBencinaExpenseForm, setShowBencinaExpenseForm] = useState(false);
   const [bencinaDate, setBencinaDate] = useState('');
+  const [showSalaryPrompt, setShowSalaryPrompt] = useState(false);
+  const [registeringSalary, setRegisteringSalary] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | null>(null);
 
   const today = useMemo(() => new Date(), []);
@@ -111,6 +113,45 @@ export default function Dashboard({
     if (!('Notification' in window)) return;
     const perm = await Notification.requestPermission();
     setNotificationPermission(perm);
+  };
+
+  // Prompt de sueldo: en modo sueldo/mixto, desde el día de pago pregunta
+  // una vez al día hasta que el sueldo del mes quede registrado
+  useEffect(() => {
+    if (initialLoading || !goal) return;
+    const mode = goal.income_mode || 'driver';
+    if (mode === 'driver' || !goal.salary_amount || !goal.salary_pay_day) return;
+    if (today.getDate() < goal.salary_pay_day) return;
+    const received = extraIncomes.some(ei => {
+      const d = new Date(ei.date + 'T00:00:00');
+      return ei.type === 'salary' && d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+    });
+    if (received) return;
+    if (localStorage.getItem('monty_salary_prompt_skip') === localDateStr()) return;
+    setShowSalaryPrompt(true);
+  }, [initialLoading, goal, extraIncomes, today]);
+
+  const registerSalary = async () => {
+    if (!goal?.salary_amount) return;
+    setRegisteringSalary(true);
+    const { error } = await supabase.from('extra_income').insert({
+      user_id: user.id,
+      amount: goal.salary_amount,
+      type: 'salary',
+      affects_goal: false, // suma a la caja pero no infla la meta de ingresos por apps
+      date: localDateStr(),
+      description: 'Sueldo mensual',
+    });
+    setRegisteringSalary(false);
+    if (!error) {
+      setShowSalaryPrompt(false);
+      fetchData();
+    }
+  };
+
+  const skipSalaryPrompt = () => {
+    localStorage.setItem('monty_salary_prompt_skip', localDateStr());
+    setShowSalaryPrompt(false);
   };
 
   const fetchData = async () => {
@@ -239,7 +280,7 @@ export default function Dashboard({
             <Target className="w-14 h-14 text-indigo-300 mx-auto mb-4" />
             <h2 className="text-xl font-black text-indigo-800 mb-2">¡Configura tu meta!</h2>
             <p className="text-sm text-indigo-500 mb-6 leading-relaxed">
-              Define cuánto quieres ganar al mes y Monty calculará tu meta diaria automáticamente.
+              Cuéntale a Monty cómo generas tus ingresos — apps, sueldo fijo o ambos — y define tu meta del mes.
             </p>
             <button
               onClick={() => setShowGoalManager(true)}
@@ -263,18 +304,51 @@ export default function Dashboard({
                   {MONTHS_ES[today.getMonth()]} {today.getFullYear()}
                 </span>
               </div>
-              <span className="text-indigo-100 text-sm font-medium uppercase tracking-widest opacity-80 block mb-2">Saldo Libre</span>
-              <h2 className="text-6xl font-black mb-6 tracking-tighter">
-                {formatCurrency(stats.totalRemaining)}
-              </h2>
+              {stats.incomeMode === 'driver' ? (
+                <>
+                  <span className="text-indigo-100 text-sm font-medium uppercase tracking-widest opacity-80 block mb-2">Saldo Libre</span>
+                  <h2 className="text-6xl font-black mb-6 tracking-tighter">
+                    {formatCurrency(stats.totalRemaining)}
+                  </h2>
+                </>
+              ) : (
+                <>
+                  <span className="text-indigo-100 text-sm font-medium uppercase tracking-widest opacity-80 block mb-2">Libre para gastar</span>
+                  <h2 className="text-6xl font-black mb-2 tracking-tighter">
+                    {formatCurrency(stats.spendableRemaining)}
+                  </h2>
+                  <p className="text-indigo-200 text-[11px] font-medium mb-4">
+                    Este mes, ya reservada tu meta de ahorro
+                    {!stats.salaryReceived && (goal?.salary_amount || 0) > 0 && ' · asume tu sueldo por llegar'}
+                  </p>
+                  {stats.incomeMode === 'mixed' && stats.driveIncomeMonth > 0 && (
+                    <div className="inline-flex items-center gap-1.5 bg-white/15 rounded-full px-4 py-1.5 mb-4">
+                      <Car className="w-3.5 h-3.5 text-emerald-300" />
+                      <span className="text-xs font-bold text-emerald-200">
+                        Apps: +{formatCurrency(stats.driveIncomeMonth)} este mes
+                      </span>
+                    </div>
+                  )}
+                </>
+              )}
               <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/10">
-                <div className="text-left">
-                  <span className="text-indigo-200 block text-[10px] uppercase font-bold tracking-wider mb-1">Generado hoy</span>
-                  <span className="font-bold text-lg">
-                    {formatCurrency(stats.netToday)}
-                    <span className="text-indigo-300 text-xs font-normal block">Meta bruta: {formatCurrency(stats.dailyTarget)}</span>
-                  </span>
-                </div>
+                {stats.incomeMode === 'driver' ? (
+                  <div className="text-left">
+                    <span className="text-indigo-200 block text-[10px] uppercase font-bold tracking-wider mb-1">Generado hoy</span>
+                    <span className="font-bold text-lg">
+                      {formatCurrency(stats.netToday)}
+                      <span className="text-indigo-300 text-xs font-normal block">Meta bruta: {formatCurrency(stats.dailyTarget)}</span>
+                    </span>
+                  </div>
+                ) : (
+                  <div className="text-left">
+                    <span className="text-indigo-200 block text-[10px] uppercase font-bold tracking-wider mb-1">Gastado hoy</span>
+                    <span className="font-bold text-lg">
+                      {formatCurrency(stats.spentToday)}
+                      <span className="text-indigo-300 text-xs font-normal block">Límite hoy: {formatCurrency(stats.spendAvailableToday)}</span>
+                    </span>
+                  </div>
+                )}
                 <div className="text-right">
                   <span className="text-indigo-200 block text-[10px] uppercase font-bold tracking-wider mb-1">Plan Gastos</span>
                   <span className="font-bold text-lg">{formatCurrency(stats.totalBudgeted)}</span>
@@ -288,7 +362,7 @@ export default function Dashboard({
         )}
 
         {/* Daily Progress Ring */}
-        {goal && (
+        {goal && stats.incomeMode === 'driver' && (
           <div className="mb-6 bg-white rounded-[2rem] p-5 border border-gray-100 shadow-sm flex items-center gap-5">
             <ProgressRing
               value={stats.netToday}
@@ -321,6 +395,40 @@ export default function Dashboard({
           </div>
         )}
 
+        {/* Gasto del día (modos sueldo/mixto): el anillo se llena con lo gastado */}
+        {goal && stats.incomeMode !== 'driver' && (
+          <div className="mb-6 bg-white rounded-[2rem] p-5 border border-gray-100 shadow-sm flex items-center gap-5">
+            <ProgressRing
+              value={stats.spentToday}
+              max={Math.max(stats.spendAvailableToday, stats.spentToday, 1)}
+              size={72}
+              strokeWidth={7}
+              color={stats.status === 'good' ? '#16a34a' : stats.status === 'warning' ? '#ca8a04' : '#dc2626'}
+              trackColor="#f3f4f6"
+            />
+            <div className="flex-1">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Gasto libre de hoy</span>
+              <div className={cn(
+                "text-2xl font-black",
+                stats.status === 'good' ? "text-green-600" : stats.status === 'warning' ? "text-yellow-600" : "text-red-600"
+              )}>
+                {formatCurrency(stats.spentToday)}
+              </div>
+              <div className="text-xs text-gray-400">
+                {stats.spendAvailableToday > 0
+                  ? `de ${formatCurrency(stats.spendAvailableToday)} disponibles hoy`
+                  : 'Sin margen de gasto libre hoy'}
+              </div>
+            </div>
+            <div className={cn(
+              "text-xs font-black px-3 py-1 rounded-full",
+              stats.status === 'good' ? "bg-green-50 text-green-700" : stats.status === 'warning' ? "bg-yellow-50 text-yellow-700" : "bg-red-50 text-red-700"
+            )}>
+              {stats.status === 'good' ? '¡Vas bien!' : stats.status === 'warning' ? 'Cuidado' : 'Te pasaste'}
+            </div>
+          </div>
+        )}
+
         {/* Estado Diario + Acumulado */}
         <div className="grid grid-cols-2 gap-4 mb-8">
           <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm">
@@ -330,7 +438,9 @@ export default function Dashboard({
               stats.status === 'good' ? "text-green-600" : stats.status === 'warning' ? "text-yellow-600" : "text-red-600"
             )}>
               {stats.status === 'good' ? <TrendingUp className="w-5 h-5 mr-2" /> : <TrendingDown className="w-5 h-5 mr-2" />}
-              {stats.status === 'good' ? '¡Vas bien!' : 'Bajo meta'}
+              {stats.status === 'good'
+                ? '¡Vas bien!'
+                : stats.incomeMode === 'driver' ? 'Bajo meta' : 'Gastando de más'}
             </div>
           </div>
           {(() => {
@@ -427,32 +537,71 @@ export default function Dashboard({
           );
         })()}
 
-        {/* Progreso Meta Mensual */}
+        {/* Progreso Meta Mensual (conductor) / Meta de Ahorro (sueldo/mixto) */}
         <div className="space-y-4">
           <div className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm relative overflow-hidden">
             <div className="flex justify-between items-center mb-3">
-              <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Progreso Meta Mensual</span>
-              <span className="text-sm font-bold text-indigo-600">{Math.round(stats.monthlyProgress * 100)}%</span>
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">
+                {stats.incomeMode === 'driver' ? 'Progreso Meta Mensual' : 'Meta de Ahorro'}
+              </span>
+              <span className={cn(
+                "text-sm font-bold",
+                stats.incomeMode !== 'driver' && stats.monthlyProgress < 1 ? "text-amber-600" : "text-indigo-600"
+              )}>
+                {Math.round(Math.max(0, stats.monthlyProgress) * 100)}%
+              </span>
             </div>
             <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden mb-3">
               <motion.div
                 initial={{ width: 0 }}
-                animate={{ width: `${Math.min(100, stats.monthlyProgress * 100)}%` }}
-                className="h-full bg-indigo-600 shadow-[0_0_10px_rgba(79,70,229,0.3)]"
+                animate={{ width: `${Math.min(100, Math.max(0, stats.monthlyProgress) * 100)}%` }}
+                className={cn(
+                  "h-full shadow-[0_0_10px_rgba(79,70,229,0.3)]",
+                  stats.incomeMode !== 'driver' && stats.monthlyProgress < 1 ? "bg-amber-500" : "bg-indigo-600"
+                )}
               />
             </div>
-            <div className="flex justify-between items-center">
-              <div>
-                <span className="text-[9px] text-gray-400 font-bold uppercase block">Ganado</span>
-                <span className="text-sm font-black text-gray-700">{formatCurrency(stats.accumulatedIncome)}</span>
+            {stats.incomeMode === 'driver' ? (
+              <div className="flex justify-between items-center">
+                <div>
+                  <span className="text-[9px] text-gray-400 font-bold uppercase block">Ganado</span>
+                  <span className="text-sm font-black text-gray-700">{formatCurrency(stats.accumulatedIncome)}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[9px] text-gray-400 font-bold uppercase block">Faltan</span>
+                  <span className="text-sm font-black text-indigo-600">
+                    {formatCurrency(Math.max(0, (goal?.monthly_target || 0) - stats.accumulatedIncome))}
+                  </span>
+                </div>
               </div>
-              <div className="text-right">
-                <span className="text-[9px] text-gray-400 font-bold uppercase block">Faltan</span>
-                <span className="text-sm font-black text-indigo-600">
-                  {formatCurrency(Math.max(0, (goal?.monthly_target || 0) - stats.accumulatedIncome))}
-                </span>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <span className="text-[9px] text-gray-400 font-bold uppercase block">Ahorro proyectado</span>
+                    <span className={cn(
+                      "text-sm font-black",
+                      stats.projectedSavings >= (goal?.monthly_target || 0) ? "text-green-600" : "text-amber-600"
+                    )}>
+                      {formatCurrency(stats.projectedSavings)}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[9px] text-gray-400 font-bold uppercase block">Meta</span>
+                    <span className="text-sm font-black text-indigo-600">
+                      {formatCurrency(goal?.monthly_target || 0)}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-2">
+                  {stats.monthlyProgress >= 1
+                    ? '✓ Si mantienes tu ritmo de gasto, cumples tu meta de ahorro.'
+                    : 'Tu gasto actual compromete la meta de ahorro. Reduce gastos o suma ingresos extra.'}
+                  {stats.incomeMode === 'mixed' && stats.driveIncomeMonth > 0 &&
+                    ` Las apps te aportaron ${formatCurrency(stats.driveIncomeMonth)}.`}
+                </p>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -648,6 +797,46 @@ export default function Dashboard({
           onClose={() => setShowBencinaExpenseForm(false)}
           onRefresh={fetchData}
         />
+      )}
+
+      {/* Prompt de sueldo el día de pago (modos sueldo/mixto) */}
+      {showSalaryPrompt && goal && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[150] flex items-center justify-center p-4"
+          onClick={skipSalaryPrompt}
+        >
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white rounded-3xl p-7 max-w-xs w-full shadow-2xl text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-5xl mb-4">💰</div>
+            <h3 className="text-xl font-black text-gray-800 mb-2">¿Te llegó tu sueldo?</h3>
+            <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+              Registra tu sueldo de <b className="text-gray-700">{formatCurrency(Number(goal.salary_amount))}</b> para
+              que tu disponible del mes sea exacto.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={registerSalary}
+                disabled={registeringSalary}
+                className="bg-emerald-500 text-white font-bold py-3 rounded-2xl hover:bg-emerald-600 transition active:scale-95 disabled:opacity-50"
+              >
+                {registeringSalary ? 'Guardando…' : 'Sí, registrar'}
+              </button>
+              <button
+                onClick={skipSalaryPrompt}
+                className="bg-gray-100 text-gray-600 font-bold py-3 rounded-2xl hover:bg-gray-200 transition active:scale-95"
+              >
+                Aún no
+              </button>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-4">
+              Si tu sueldo varió este mes, regístralo manualmente con el botón ⚡ como tipo "Sueldo".
+            </p>
+          </motion.div>
+        </div>
       )}
 
       <button

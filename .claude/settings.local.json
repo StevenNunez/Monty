@@ -14,7 +14,11 @@
       "Bash(npm update *)",
       "Bash(Get-ChildItem -Recurse -Force)",
       "Bash(Select-Object -First 100)",
-      "Bash(Format-Table FullName)"
+      "Bash(Format-Table FullName)",
+      "PowerShell(npm run *)",
+      "PowerShell(npx tsx \"C:\\\\Users\\\\xistv\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--TeoLabs-Monty\\\\40f8a3b7-07af-42de-b595-757e8811385f\\\\scratchpad\\\\test-mixed-mode.ts\")",
+      "Bash(npm install *)",
+      "Bash(npx vitest *)"
     ]
   }
 }

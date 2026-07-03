@@ -1,5 +1,5 @@
 import { startOfMonth, endOfMonth, differenceInDays, isSameDay } from 'date-fns';
-import { DailyEntry, ExtraIncome, UserGoal, DashboardStats, Expense, Budget, CategoryBalance } from '../types';
+import { DailyEntry, ExtraIncome, UserGoal, DashboardStats, Expense, Budget, CategoryBalance, IncomeMode } from '../types';
 
 /**
  * daily_target = (monthly_target - accumulated_net_income_month - extra_income_applied) / remaining_days
@@ -143,12 +143,57 @@ export function calculateStats(
   const totalCashIn = accumulatedNetMonth + allExtraIncomeMonth;
   const totalRemaining = totalCashIn - totalBudgeted - unplannedSpent - groupExpensesTotal;
 
+  // ─── Modos salary / mixed ─────────────────────────────────────
+  // La lógica se invierte: en vez de "cuánto me falta ganar hoy",
+  // la pregunta es "cuánto puedo gastar hoy" y la meta mensual es meta de ahorro.
+  const incomeMode: IncomeMode = goal?.income_mode || 'driver';
+  const salaryAmount = Number(goal?.salary_amount || 0);
+
+  const salaryReceived = extraIncomes.some(ei => {
+    const d = new Date(ei.date + 'T00:00:00');
+    return ei.type === 'salary' && d >= monthStart && d <= monthEnd;
+  });
+  // Si el sueldo aún no llega, se asume que llegará (permite planificar el mes completo)
+  const pendingSalary = incomeMode !== 'driver' && !salaryReceived ? salaryAmount : 0;
+
+  // Gasto libre de HOY (imprevistos + grupos; lo presupuestado ya está descontado completo)
+  const unplannedSpentToday = monthExpenses
+    .filter(e => !budgetCategories.has(e.category.trim().toLowerCase()) && isSameDay(new Date(e.date + 'T00:00:00'), today))
+    .reduce((sum, e) => sum + Number(e.amount), 0);
+  const groupSpentToday = monthGroupItems
+    .filter(item => {
+      const rawDate = item.date ?? (item.created_at ? item.created_at.split('T')[0] : null);
+      return rawDate ? isSameDay(new Date(rawDate + 'T00:00:00'), today) : false;
+    })
+    .reduce((sum, item) => sum + Number(item.amount), 0);
+  const spentToday = unplannedSpentToday + groupSpentToday;
+
+  // Ahorro proyectado = caja esperada del mes − presupuestos − gasto libre ya hecho
+  const projectedSavings = totalCashIn + pendingSalary - totalBudgeted - unplannedSpent - groupExpensesTotal;
+  // Lo que queda libre para gastar sin comprometer la meta de ahorro
+  const spendableRemaining = projectedSavings - monthlyTarget;
+  const remainingCalendarDays = Math.max(1, differenceInDays(monthEnd, today) + 1);
+  // Límite de hoy: se calcula ANTES de descontar lo gastado hoy, para comparar contra spentToday
+  const spendAvailableToday = Math.max(0, (spendableRemaining + spentToday) / remainingCalendarDays);
+
+  if (incomeMode !== 'driver') {
+    const overspend = spentToday - spendAvailableToday;
+    if (overspend <= 0) status = 'good';
+    else if (overspend > spendAvailableToday * 0.2) status = 'bad';
+    else status = 'warning';
+  }
+
+  const finalMonthlyProgress = incomeMode !== 'driver'
+    ? (monthlyTarget > 0 ? projectedSavings / monthlyTarget : 0)
+    : monthlyProgress;
+  const finalMonthlyProjection = incomeMode !== 'driver' ? projectedSavings : monthlyProjection;
+
   return {
     netToday,
     dailyTarget,
     status,
-    monthlyProgress,
-    monthlyProjection,
+    monthlyProgress: finalMonthlyProgress,
+    monthlyProjection: finalMonthlyProjection,
     diff,
     totalBudgeted,
     plannedSpent,
@@ -157,6 +202,13 @@ export function calculateStats(
     totalRemaining,
     accumulatedIncome: totalGenerated,
     totalCashIn,
-    categoryBalances
+    categoryBalances,
+    incomeMode,
+    salaryReceived,
+    spentToday,
+    spendAvailableToday,
+    spendableRemaining,
+    projectedSavings,
+    driveIncomeMonth: accumulatedNetMonth
   };
 }

@@ -55,11 +55,17 @@ CREATE TABLE IF NOT EXISTS extra_income (
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
     amount DECIMAL(12,2) NOT NULL DEFAULT 0,
     date DATE DEFAULT CURRENT_DATE NOT NULL,
-    type TEXT NOT NULL CHECK (type IN ('bonus', 'tax_return', 'sale', 'other')),
+    type TEXT NOT NULL CHECK (type IN ('bonus', 'tax_return', 'sale', 'salary', 'other')),
     affects_goal BOOLEAN DEFAULT TRUE NOT NULL,
     description TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Migración: permitir tipo 'salary' en tablas existentes (el nombre del constraint
+-- es el autogenerado por Postgres para el CHECK inline de la columna type)
+ALTER TABLE extra_income DROP CONSTRAINT IF EXISTS extra_income_type_check;
+ALTER TABLE extra_income ADD CONSTRAINT extra_income_type_check
+    CHECK (type IN ('bonus', 'tax_return', 'sale', 'salary', 'other'));
 
 ALTER TABLE extra_income ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
@@ -73,10 +79,22 @@ CREATE TABLE IF NOT EXISTS goals (
     monthly_target DECIMAL(12,2) NOT NULL DEFAULT 0,
     yearly_target DECIMAL(12,2) NOT NULL DEFAULT 0,
     working_days INTEGER[] DEFAULT '{1,2,3,4,5,6}',
+    income_mode TEXT DEFAULT 'driver',
+    salary_amount DECIMAL(12,2) DEFAULT 0,
+    salary_pay_day INTEGER,
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 ALTER TABLE goals ADD COLUMN IF NOT EXISTS working_days INTEGER[] DEFAULT '{1,2,3,4,5,6}';
+
+-- Migración: modo de ingreso (conductor / sueldo fijo / mixto) y sueldo recurrente
+ALTER TABLE goals ADD COLUMN IF NOT EXISTS income_mode TEXT DEFAULT 'driver';
+ALTER TABLE goals ADD COLUMN IF NOT EXISTS salary_amount DECIMAL(12,2) DEFAULT 0;
+ALTER TABLE goals ADD COLUMN IF NOT EXISTS salary_pay_day INTEGER;
+DO $$ BEGIN
+  ALTER TABLE goals ADD CONSTRAINT goals_income_mode_check
+      CHECK (income_mode IN ('driver', 'salary', 'mixed'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 ALTER TABLE goals ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
